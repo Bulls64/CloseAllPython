@@ -57,6 +57,9 @@ Get `CloseAllPython.exe` (graphical application) and `CloseAllPython-CLI.exe` (c
 
 To close applications that run as administrator, use **Administrator mode** in the application.
 
+> [!NOTE]
+> **Windows warning on first launch.** The executables are not code-signed, so Windows SmartScreen ("Windows protected your PC") or your antivirus may flag them. This is common for unsigned programs built with PyInstaller. If you prefer not to trust the binaries, [build them yourself](#build-from-source) from the source code, which is entirely in this repository. To run anyway: click **More info**, then **Run anyway**. If a file is quarantined by your antivirus, restore it and add an exclusion for it.
+
 ### Usage
 
 1. **Applications**: one card per application (name, icon, number of windows, PID). Tick the applications to close, expand a card to see its windows, search with <kbd>Ctrl</kbd>+<kbd>F</kbd>, refresh with <kbd>F5</kbd>.
@@ -176,6 +179,9 @@ CloseAllPython liste les fenêtres visibles dans Alt+Tab et ferme les applicatio
 Récupérez `CloseAllPython.exe` (application graphique) et `CloseAllPython-CLI.exe` (ligne de commande) sur la page [Releases](../../releases). Aucune installation : lancez l'exécutable. Windows 10 ou 11 est nécessaire.
 
 Pour fermer des applications lancées en administrateur, utilisez **Mode administrateur** dans l'application.
+
+> [!NOTE]
+> **Avertissement de Windows au premier lancement.** Les exécutables ne sont pas signés numériquement : Windows SmartScreen (« Windows a protégé votre ordinateur ») ou votre antivirus peut donc les signaler. C'est courant pour les programmes non signés créés avec PyInstaller. Si vous préférez ne pas faire confiance aux binaires, [compilez-les vous-même](#compiler-depuis-les-sources) à partir du code source, entièrement disponible dans ce dépôt. Pour lancer malgré tout : cliquez sur **Informations complémentaires**, puis sur **Exécuter quand même**. Si un fichier est mis en quarantaine par votre antivirus, restaurez-le et ajoutez une exclusion.
 
 ### Utilisation
 

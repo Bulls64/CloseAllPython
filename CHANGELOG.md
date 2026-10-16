@@ -6,6 +6,7 @@
 - Bottom bar of the application list: the buttons keep their full width ("Close Explorer windows" was cut off in French when applications were selected) and the texts on the left wrap instead.
 - README rewritten for GitHub, with screenshots in `docs/screenshots`.
 - Released under the MIT License (`LICENSE` file); the copyright notice is also shown in the properties of the executables.
+- README: note about the Windows SmartScreen / antivirus warning on the unsigned executables.
 
 ## 1.5.0 (2026-10-16)
 
@@ -83,6 +84,7 @@ Project
 - Barre du bas de la liste des applications : les boutons gardent toute leur largeur (« Fermer les fenêtres de l'Explorateur » était coupé en français quand des applications étaient sélectionnées) et les textes de gauche passent à la ligne à la place.
 - README réécrit pour GitHub, avec des captures d'écran dans `docs/screenshots`.
 - Publié sous licence MIT (fichier `LICENSE`) ; la mention de copyright apparaît aussi dans les propriétés des exécutables.
+- README : note sur l'avertissement Windows SmartScreen / antivirus pour les exécutables non signés.
 
 ## 1.5.0 (2026-10-16)
 
