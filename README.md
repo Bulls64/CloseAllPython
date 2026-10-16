@@ -8,7 +8,8 @@
 
 ![Windows 10 | 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4)
 ![Python 3.14](https://img.shields.io/badge/Python-3.14-3776AB)
-![Version 1.5.1](https://img.shields.io/badge/version-1.5.1-2ea44f)
+[![Latest release](https://img.shields.io/github/v/release/Bulls64/CloseAllPython?label=version&color=2ea44f)](../../releases/latest)
+[![Tests and release](https://github.com/Bulls64/CloseAllPython/actions/workflows/build.yml/badge.svg)](../../actions/workflows/build.yml)
 ![Languages: EN | FR](https://img.shields.io/badge/languages-EN%20%7C%20FR-lightgrey)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
 
@@ -54,6 +55,8 @@ CloseAllPython lists the windows you see in Alt+Tab and closes the applications 
 ### Download
 
 Get `CloseAllPython.exe` (graphical application) and `CloseAllPython-CLI.exe` (command line) from the [Releases](../../releases) page. No installation: run the executable. Windows 10 or 11 is required.
+
+The executables are built by GitHub Actions from the tagged source code ([workflow](.github/workflows/build.yml)), so each release matches the code of its version.
 
 To close applications that run as administrator, use **Administrator mode** in the application.
 
@@ -177,6 +180,8 @@ CloseAllPython liste les fenêtres visibles dans Alt+Tab et ferme les applicatio
 ### Téléchargement
 
 Récupérez `CloseAllPython.exe` (application graphique) et `CloseAllPython-CLI.exe` (ligne de commande) sur la page [Releases](../../releases). Aucune installation : lancez l'exécutable. Windows 10 ou 11 est nécessaire.
+
+Les exécutables sont compilés par GitHub Actions à partir du code source taggé ([workflow](.github/workflows/build.yml)) : chaque release correspond exactement au code de sa version.
 
 Pour fermer des applications lancées en administrateur, utilisez **Mode administrateur** dans l'application.
 

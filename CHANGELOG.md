@@ -7,6 +7,7 @@
 - README rewritten for GitHub, with screenshots in `docs/screenshots`.
 - Released under the MIT License (`LICENSE` file); the copyright notice is also shown in the properties of the executables.
 - README: note about the Windows SmartScreen / antivirus warning on the unsigned executables.
+- GitHub Actions: tests on Windows with Python 3.14 on every push; a version tag builds both executables and attaches them to its release, with notes taken from this changelog.
 
 ## 1.5.0 (2026-10-16)
 
@@ -85,6 +86,7 @@ Project
 - README réécrit pour GitHub, avec des captures d'écran dans `docs/screenshots`.
 - Publié sous licence MIT (fichier `LICENSE`) ; la mention de copyright apparaît aussi dans les propriétés des exécutables.
 - README : note sur l'avertissement Windows SmartScreen / antivirus pour les exécutables non signés.
+- GitHub Actions : tests sous Windows avec Python 3.14 à chaque push ; un tag de version compile les deux exécutables et les joint à sa release, avec des notes tirées de ce journal.
 
 ## 1.5.0 (2026-10-16)
 

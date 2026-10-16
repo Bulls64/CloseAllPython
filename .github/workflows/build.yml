@@ -1,0 +1,75 @@
+# Tests on every push and pull request. A pushed version tag (v1.5.1...) also builds the two
+# executables on Windows and attaches them to the GitHub release of that tag, with notes taken
+# from CHANGELOG.md, so the published binaries always match the tagged source code.
+name: Tests and release
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+      - name: Run the tests
+        run: python -m unittest discover -s tests -t . -v
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    runs-on: windows-latest
+    permissions:
+      contents: write   # create or update the release and its files
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Check that the tag matches the program version
+        shell: bash
+        run: |
+          version=$(python -c "import closeall; print(closeall.__version__)")
+          if [ "v$version" != "$TAG" ]; then
+            echo "::error::Tag $TAG does not match closeall.__version__ ($version)"
+            exit 1
+          fi
+      - name: Install build dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements-build.txt
+      - name: Build the executables
+        shell: bash
+        run: |
+          python -m PyInstaller --noconfirm --clean --distpath dist --workpath build CloseAllPython.spec
+          python -m PyInstaller --noconfirm --clean --distpath dist --workpath build CloseAllPython-CLI.spec
+          ls -l dist
+      - name: Write the release notes
+        run: python .github/scripts/release_notes.py "$env:TAG" release-notes.md
+      - name: Publish the release
+        shell: bash
+        run: |
+          title="CloseAllPython $TAG"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release edit "$TAG" --title "$title" --notes-file release-notes.md
+          else
+            gh release create "$TAG" --title "$title" --notes-file release-notes.md --verify-tag
+          fi
+          gh release upload "$TAG" dist/CloseAllPython.exe dist/CloseAllPython-CLI.exe --clobber
