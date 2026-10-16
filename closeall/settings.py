@@ -16,9 +16,10 @@ DEFAULT_SETTINGS = {
     "confirm_before_terminate": True,
     "instant_force": True,
     "close_timeout": 5,
+    "auto_update": False,
 }
 THEMES = ("system", "light", "dark")
-BOOL_KEYS = ("group_by_app", "show_icons", "confirm_before_terminate", "instant_force")
+BOOL_KEYS = ("group_by_app", "show_icons", "confirm_before_terminate", "instant_force", "auto_update")
 TIMEOUT_MIN, TIMEOUT_MAX = 1, 60
 
 LOGGER_NAME = "closeallpython"

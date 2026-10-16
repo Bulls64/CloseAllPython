@@ -34,7 +34,8 @@ CloseAllPython lists the windows you see in Alt+Tab and closes the applications 
 - **Windows stays usable.** Shell processes (Explorer, ApplicationFrameHost, TextInputHost…) are listed apart and can never be closed.
 - **No wrong target.** Before acting, each process ID is checked against its creation time, so a recycled PID is never killed.
 - **Close Explorer windows.** Closes every File Explorer folder window (all tabs) while the desktop and taskbar keep running.
-- **Always up to date.** The list refreshes by itself after a closing; icons load in the background.
+- **Live list.** The list refreshes by itself after a closing; icons load in the background.
+- **Updates from GitHub.** *Check for updates* in the settings, or turn on the automatic update at startup; each download is verified against the SHA-256 checksum published by GitHub before it replaces the program.
 - **Command line.** Scriptable `--no-ui` mode with dry run, filters and exit codes.
 - **Logged.** Every action goes to a log file; unexpected errors are shown and saved to `crash.txt`.
 - Light, dark or system theme · English and French · sharp on high-DPI screens.
@@ -71,6 +72,8 @@ To close applications that run as administrator, use **Administrator mode** in t
 
 Closing an application closes all of its windows. The **Log** screen shows the latest actions; **Settings** are saved automatically.
 
+**Updates.** In **Settings › About**, *Check for updates* compares your version with the latest GitHub release and offers to install it; the application then restarts on the new version. With *Update automatically at startup* (off by default), the check runs each time the application opens and a new version is installed in the background, used from the next start or right away if you choose to restart. The application contacts GitHub only for these checks. If it sits in a folder you cannot write to (such as `Program Files`), download the new version from the release page instead.
+
 ### Command line
 
 ```bat
@@ -79,11 +82,12 @@ CloseAllPython-CLI.exe --no-ui --close "notepad"
 CloseAllPython-CLI.exe --no-ui --close "notepad" --yes --graceful --timeout 10
 CloseAllPython-CLI.exe --no-ui --all --dry-run
 CloseAllPython-CLI.exe --no-ui --close-explorer
+CloseAllPython-CLI.exe --update
 ```
 
 | Option | Effect |
 | --- | --- |
-| `--no-ui` | command-line mode (required by every option below) |
+| `--no-ui` | command-line mode (required by the options below, except `--version` and `--update`) |
 | `--close TEXT` | applications with a window title containing TEXT (case-insensitive, must not be empty) |
 | `--all` | every application with a visible window; must be explicit |
 | `--dry-run` | only list what would be closed |
@@ -93,6 +97,7 @@ CloseAllPython-CLI.exe --no-ui --close-explorer
 | `--timeout SECONDS` | wait time, 0–600 (default: the setting of the graphical application) |
 | `--close-explorer` | close only the File Explorer windows (the process is not touched) |
 | `--version` | print the version |
+| `--update` | install the latest GitHub release over this executable; used on its own, without `--no-ui` |
 
 The command line never closes itself, the terminal it runs in, or its parent processes.
 
@@ -163,7 +168,8 @@ CloseAllPython liste les fenêtres visibles dans Alt+Tab et ferme les applicatio
 - **Windows reste utilisable.** Les processus du shell (Explorer, ApplicationFrameHost, TextInputHost…) sont listés à part et ne peuvent jamais être fermés.
 - **Aucune erreur de cible.** Avant d'agir, chaque identifiant de processus est vérifié grâce à son heure de création : un PID recyclé n'est jamais tué.
 - **Fermer les fenêtres de l'Explorateur.** Ferme toutes les fenêtres de dossiers de l'Explorateur de fichiers (tous les onglets) ; le bureau et la barre des tâches continuent de fonctionner.
-- **Toujours à jour.** La liste s'actualise toute seule après une fermeture ; les icônes se chargent en arrière-plan.
+- **Liste en direct.** La liste s'actualise toute seule après une fermeture ; les icônes se chargent en arrière-plan.
+- **Mises à jour depuis GitHub.** *Rechercher des mises à jour* dans les paramètres, ou activez la mise à jour automatique au démarrage ; chaque téléchargement est vérifié avec l'empreinte SHA-256 publiée par GitHub avant de remplacer le programme.
 - **Ligne de commande.** Mode `--no-ui` utilisable dans des scripts, avec simulation, filtres et codes de sortie.
 - **Journalisé.** Chaque action est inscrite dans un journal ; les erreurs inattendues sont affichées et enregistrées dans `crash.txt`.
 - Thème clair, sombre ou système · anglais et français · net sur les écrans haute densité.
@@ -196,6 +202,8 @@ Pour fermer des applications lancées en administrateur, utilisez **Mode adminis
 
 Fermer une application ferme toutes ses fenêtres. L'écran **Journal** affiche les dernières actions ; les **Paramètres** sont enregistrés automatiquement.
 
+**Mises à jour.** Dans **Paramètres › À propos**, *Rechercher des mises à jour* compare votre version avec la dernière release GitHub et propose de l'installer ; l'application redémarre alors sur la nouvelle version. Avec *Mettre à jour automatiquement au démarrage* (désactivé par défaut), la vérification a lieu à chaque ouverture et une nouvelle version s'installe en arrière-plan, utilisée au démarrage suivant ou tout de suite si vous choisissez de redémarrer. L'application ne contacte GitHub que pour ces vérifications. Si elle se trouve dans un dossier où vous ne pouvez pas écrire (comme `Program Files`), téléchargez la nouvelle version sur la page de la release.
+
 ### Ligne de commande
 
 ```bat
@@ -204,11 +212,12 @@ CloseAllPython-CLI.exe --no-ui --close "notepad"
 CloseAllPython-CLI.exe --no-ui --close "notepad" --yes --graceful --timeout 10
 CloseAllPython-CLI.exe --no-ui --all --dry-run
 CloseAllPython-CLI.exe --no-ui --close-explorer
+CloseAllPython-CLI.exe --update
 ```
 
 | Option | Effet |
 | --- | --- |
-| `--no-ui` | mode ligne de commande (requis par toutes les options ci-dessous) |
+| `--no-ui` | mode ligne de commande (requis par les options ci-dessous, sauf `--version` et `--update`) |
 | `--close TEXTE` | applications dont un titre de fenêtre contient TEXTE (insensible à la casse, ne doit pas être vide) |
 | `--all` | toutes les applications ayant une fenêtre visible ; doit être explicite |
 | `--dry-run` | liste seulement ce qui serait fermé |
@@ -218,6 +227,7 @@ CloseAllPython-CLI.exe --no-ui --close-explorer
 | `--timeout SECONDES` | durée d'attente, 0–600 (par défaut : le paramètre de l'application graphique) |
 | `--close-explorer` | ferme uniquement les fenêtres de l'Explorateur de fichiers (le processus n'est pas touché) |
 | `--version` | affiche la version |
+| `--update` | installe la dernière release GitHub à la place de cet exécutable ; s'utilise seule, sans `--no-ui` |
 
 La ligne de commande ne se ferme jamais elle-même, ni le terminal dans lequel elle s'exécute, ni ses processus parents.
 

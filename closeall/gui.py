@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 
 import customtkinter as ctk
 
-from . import __version__, appicon, core, crash, settings as settings_mod, winapi
+from . import __version__, appicon, core, crash, settings as settings_mod, updater, winapi
 from .gui_theme import (ACCENT, ACCENT_HOVER, C, WARN_FILL, WARN_FILL_HOVER, WARN_ON, WHITE, Fonts,
                         tile_color, tile_letter)
 from .i18n import LANGUAGE_NAMES, format_seconds, translate, translate_n
@@ -34,6 +34,7 @@ AFTER_CLOSE_REFRESH_MS = (0, 400, 1200, 3000)
 # After closing Explorer windows (folder windows close asynchronously).
 EXPLORER_REFRESH_MS = (700, 2000)
 RETRY_REFRESH_MS = 150
+UPDATE_STARTUP_DELAY_MS = 2000   # the automatic check waits until the window is up
 
 
 def resource_path(name):
@@ -146,7 +147,7 @@ def pill(master, app):
 class Dialog(ctk.CTkToplevel):
     """Modal message in the application's style (confirmation when `confirm_text` is given)."""
 
-    def __init__(self, app, title, message, items=(), confirm_text=None, on_confirm=None):
+    def __init__(self, app, title, message, items=(), confirm_text=None, on_confirm=None, cancel_text=None):
         super().__init__(app, fg_color=C["bg"])
         self.app, self.on_confirm = app, on_confirm
         self._counted = True
@@ -177,7 +178,8 @@ class Dialog(ctk.CTkToplevel):
         buttons.pack(fill="x", pady=(20, 0))
         if confirm_text:
             primary_button(buttons, app, confirm_text, self._confirm).pack(side="right")
-            ghost_button(buttons, app, app.t("cancel"), self.destroy, height=44).pack(side="right", padx=(0, 10))
+            ghost_button(buttons, app, cancel_text or app.t("cancel"), self.destroy, height=44).pack(
+                side="right", padx=(0, 10))
         else:
             primary_button(buttons, app, app.t("ok"), self.destroy, width=100).pack(side="right")
         self.bind("<Escape>", lambda _e: self.destroy())
@@ -978,6 +980,25 @@ class SettingsPage(ctk.CTkFrame):
         ghost_button(buttons, app, t("open_log"), lambda: app.show("log")).pack(side="left")
         if not app.is_admin:
             ghost_button(buttons, app, t("admin_restart"), app.restart_as_admin).pack(side="left", padx=(8, 0))
+        updates = ctk.CTkFrame(about, fg_color="transparent")
+        updates.pack(fill="x", pady=(16, 0))
+        self._switch(updates, "auto_update", t("auto_update"), t("auto_update_hint"))
+        line = ctk.CTkFrame(updates, fg_color="transparent")
+        line.pack(fill="x", pady=(8, 0))
+        self.check_button = ghost_button(line, app, t("check_updates"), app.updates.check)
+        self.check_button.pack(side="left")
+        self.update_status = label(updates, "", app.fonts.small, "muted", wraplength=360)
+        self.update_status.pack(fill="x", pady=(8, 0))
+        app.updates.on_status = self._show_update_status
+        self._show_update_status()
+
+    def _show_update_status(self):
+        updates = self.app.updates
+        try:
+            self.update_status.configure(text=updates.status_text())
+            self.check_button.configure(state="disabled" if updates.running or updates.installed else "normal")
+        except tk.TclError:
+            pass   # page destroyed (language change): the new page registers itself
 
     def _section(self, grid, title, row, column):
         box = ctk.CTkFrame(grid, fg_color=C["surface"], border_color=C["border"], border_width=1, corner_radius=12)
@@ -1023,6 +1044,130 @@ class SettingsPage(ctk.CTkFrame):
         if self.save_job is not None:
             self.after_cancel(self.save_job)
         self.save_job = self.after(300, lambda: self.app.update_settings(close_timeout=seconds))
+
+
+# ====================================================================== updates
+
+class Updates:
+    """Checks GitHub for a newer release and installs it, off the Tk thread.
+
+    Manual check (Settings): asks before installing, then restarts into the new version.
+    Automatic check (startup, when enabled): installs silently and offers to restart; the new
+    version is used at the next start anyway. Results go to `status` (shown on the settings page).
+    """
+
+    def __init__(self, app, module=updater):
+        self.app, self.module = app, module
+        self.running = False
+        self.status = None        # (i18n key, values) or None
+        self.on_status = None     # callback of the settings page
+        self.installed = None     # Path of an executable updated during this session
+
+    def set_status(self, key, **values):
+        self.status = (key, values) if key else None
+        if self.on_status:
+            self.on_status()
+
+    def status_text(self):
+        if not self.status:
+            return ""
+        key, values = self.status
+        values = dict(values)
+        if "error" in values and isinstance(values["error"], tuple):
+            error_key, error_values = values["error"]
+            values["error"] = self.app.t(error_key, **error_values)
+        return self.app.t(key, **values)
+
+    def _thread(self, work, done, failed):
+        def run():
+            try:
+                result = work()
+            except self.module.UpdateError as exc:
+                self.app.call_soon(lambda error=exc: failed(error))
+            except Exception:   # never let a network oddity kill the worker silently
+                log.exception("update failed")
+                self.app.call_soon(lambda: failed(self.module.UpdateError("update_err_response")))
+            else:
+                self.app.call_soon(lambda: done(result))
+        threading.Thread(target=run, name="updates", daemon=True).start()
+
+    def check(self, automatic=False):
+        if self.running or self.installed:
+            return
+        self.running = True
+        self.set_status("update_checking")
+        self._thread(self.module.fetch_latest, lambda release: self._checked(release, automatic),
+                     lambda exc: self._failed(exc, automatic))
+
+    def _failed(self, exc, automatic):
+        self.running = False
+        log.info("update check failed: %s %s", exc.key, exc.values)
+        self.set_status("update_failed", error=(exc.key, exc.values))
+
+    def _checked(self, release, automatic):
+        self.running = False
+        if not self.module.is_newer(release):
+            self.set_status("update_latest", version=__version__)
+            return
+        self.set_status("update_available", version=release.label)
+        exe = self.module.current_executable()
+        app, t = self.app, self.app.t
+        if exe is None:
+            if not automatic:
+                Dialog(app, t("update_title"), t("update_source_message", version=release.label, current=__version__),
+                       confirm_text=t("update_open_page"), on_confirm=lambda: self._open_page(release))
+        elif automatic:
+            self.install(release, exe, restart=False)
+        else:
+            Dialog(app, t("update_title"), t("update_message", version=release.label, current=__version__),
+                   confirm_text=t("update_install"), on_confirm=lambda: self.install(release, exe, restart=True))
+
+    def _open_page(self, release):
+        import webbrowser
+
+        webbrowser.open(release.page)
+
+    def install(self, release, exe, restart):
+        if self.running:
+            return
+        self.running = True
+        self.set_status("update_downloading", version=release.label, percent=0)
+        last = [-1]
+
+        def progress(done, total):
+            percent = int(done * 100 / total) if total else 0
+            if percent != last[0]:
+                last[0] = percent
+                self.app.call_soon(lambda: self.set_status("update_downloading", version=release.label,
+                                                           percent=percent))
+
+        self._thread(lambda: self.module.update(exe, release, progress=progress),
+                     lambda path: self._installed(release, path, restart),
+                     lambda exc: self._failed(exc, not restart))
+
+    def _installed(self, release, path, restart):
+        self.running = False
+        self.installed = path
+        self.set_status("update_installed", version=release.label)
+        if restart:
+            self.restart()
+        else:
+            t = self.app.t
+            Dialog(self.app, t("update_done_title"), t("update_done_message", version=release.label),
+                   confirm_text=t("update_restart"), on_confirm=self.restart, cancel_text=t("update_later"))
+
+    def restart(self):
+        if self.installed is None:
+            return
+        if self.app.busy:
+            Dialog(self.app, self.app.t("update_title"), self.app.t("update_busy"))
+            return
+        try:
+            self.module.relaunch(self.installed)
+        except OSError as exc:
+            Dialog(self.app, self.app.t("error"), self.app.t("update_failed", error=exc))
+            return
+        self.app.destroy()
 
 
 # ====================================================================== window
@@ -1076,10 +1221,14 @@ class App(ctk.CTk):
         self.grid_rowconfigure(0, weight=1)
         self.rail = None
         self.list_page = None
+        self.updates = Updates(self)
+        updater.cleanup()   # leftovers of an update installed by the previous run
         self.build()
         self.bind("<F5>", lambda _e: self.list_page.refresh() if self.current == "apps" else None)
         self.bind("<Control-f>", lambda _e: (self.show("apps"), self.list_page.focus_search()))
         self.after(POLL_MS, self._poll)
+        if self.settings["auto_update"] and updater.current_executable() is not None:
+            self.after(UPDATE_STARTUP_DELAY_MS, lambda: self.updates.check(automatic=True))
 
     # ---------------------------------------------------------------- helpers
     @property

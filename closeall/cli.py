@@ -24,6 +24,7 @@ def build_parser(language):
     parser.add_argument("--graceful", action="store_true", help=t("cli_help_graceful"))
     parser.add_argument("--dry-run", action="store_true", help=t("cli_help_dry_run"))
     parser.add_argument("--timeout", type=int, metavar="SECONDS", help=t("cli_help_timeout"))
+    parser.add_argument("--update", action="store_true", help=t("cli_help_update"))
     return parser
 
 
@@ -32,6 +33,10 @@ def parse_args(argv, language):
     args = parser.parse_args(argv)
     cli_only = (args.close is not None or args.all or args.close_explorer or args.yes or args.force or args.graceful or args.dry_run
                 or args.timeout is not None)
+    if args.update:
+        if cli_only or args.no_ui:
+            parser.error(translate(language, "cli_update_alone"))
+        return args
     if cli_only and not args.no_ui:
         parser.error(translate(language, "cli_requires_no_ui"))
     if args.no_ui:
@@ -121,10 +126,43 @@ def run_cli(args, prefs, out=None, err=None, stdin=None):
     return 1 if counts[core.FAILED] or counts[core.STILL_RUNNING] else 0
 
 
+def run_update(prefs, out=None, err=None, updater=None, exe_path=None):
+    """--update: install the latest GitHub release over this executable. Exit code 0 when up to
+    date or updated, 1 on failure."""
+    if updater is None:
+        from . import updater
+    out = sys.stdout if out is None else out
+    err = sys.stderr if err is None else err
+    language = prefs["language"]
+
+    def t(key, **values):
+        return translate(language, key, **values)
+
+    try:
+        release = updater.fetch_latest()
+        if not updater.is_newer(release):
+            _emit(out, t("cli_update_latest", version=__version__))
+            return 0
+        _emit(out, t("cli_update_available", version=release.label, current=__version__))
+        exe_path = exe_path or updater.current_executable()
+        if exe_path is None:
+            _emit(out, t("cli_update_source", url=release.page))
+            return 0
+        _emit(out, t("cli_update_downloading", name=updater.asset_for(release, exe_path).name))
+        updater.update(exe_path, release)
+    except updater.UpdateError as exc:
+        _emit(err, t("cli_update_failed", error=t(exc.key, **exc.values)))
+        return 1
+    _emit(out, t("cli_update_done", version=release.label))
+    return 0
+
+
 def run(argv=None):
     settings_mod.setup_logging()
     prefs = settings_mod.load_settings()
     args = parse_args(sys.argv[1:] if argv is None else argv, prefs["language"])
+    if args.update:
+        return run_update(prefs)
     if args.no_ui:
         return run_cli(args, prefs)
     try:

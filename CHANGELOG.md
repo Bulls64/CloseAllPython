@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.6.0 (2026-10-16)
+
+Updates from GitHub
+- New "Check for updates" button in Settings › About: reads the latest release of the GitHub repository and, when it is newer, offers to install it and restart.
+- New setting "Update automatically at startup" (off by default): checks GitHub two seconds after the window opens, installs a newer version in the background and offers to restart; otherwise the new version is used at the next start.
+- New CLI option `--update`: installs the latest release over the running executable (`CloseAllPython-CLI.exe --update`).
+- The downloaded executable must match the size and the SHA-256 checksum published by GitHub for the release and start like a Windows program, otherwise nothing is replaced. The running file is renamed (`.old`), the new one takes its place, and the old copy is removed at the next start; if the swap fails, the previous version is put back.
+- Running from source, the application only reports a new version and points to `git pull` or the release page.
+- The application contacts GitHub only when you check for updates or when the automatic update is on.
+
 ## 1.5.1 (2026-10-16)
 
 - Sharp application icon in the title bar, the taskbar and Alt+Tab on scaled displays (125 %, 150 %, 200 %...). Tk's `wm iconbitmap` always used the 16 and 32 px images of the icon, which Windows then enlarged; the window now gets icons at the exact size of its monitor's scaling (designed image when the .ico has that size, otherwise reduced from a larger one), updated when the window moves to a monitor with another scaling. Dialogs too.
@@ -78,6 +88,16 @@ Project
 ---
 
 # Journal des modifications (version française)
+
+## 1.6.0 (2026-10-16)
+
+Mises à jour depuis GitHub
+- Nouveau bouton « Rechercher des mises à jour » dans Paramètres › À propos : lit la dernière release du dépôt GitHub et, si elle est plus récente, propose de l’installer et de redémarrer.
+- Nouveau paramètre « Mettre à jour automatiquement au démarrage » (désactivé par défaut) : vérifie GitHub deux secondes après l’ouverture de la fenêtre, installe la nouvelle version en arrière-plan et propose de redémarrer ; sinon, elle est utilisée au prochain démarrage.
+- Nouvelle option CLI `--update` : installe la dernière release à la place de l’exécutable en cours (`CloseAllPython-CLI.exe --update`).
+- L’exécutable téléchargé doit correspondre à la taille et à l’empreinte SHA-256 publiées par GitHub pour la release, et commencer comme un programme Windows ; sinon rien n’est remplacé. Le fichier en cours est renommé (`.old`), le nouveau prend sa place, et l’ancienne copie est supprimée au démarrage suivant ; si l’échange échoue, la version précédente est remise en place.
+- Lancée depuis les sources, l’application signale seulement la nouvelle version et renvoie vers `git pull` ou la page de la release.
+- L’application ne contacte GitHub que lorsque vous recherchez des mises à jour ou que la mise à jour automatique est activée.
 
 ## 1.5.1 (2026-10-16)
 
