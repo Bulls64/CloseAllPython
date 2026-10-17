@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.7.0 (2026-10-17)
+
+"Close everything" shortcut
+- New **Shortcut** section in Settings: *Create the shortcut* puts a "Close everything" shortcut on the desktop. Running it starts the application without any window (`--no-ui --all -y`) and instantly force-closes every open window, with no confirmation; protected Windows processes are still skipped. Unsaved work is lost, as the section says.
+- *Pin to the taskbar…* shows the shortcut in File Explorer with the steps to pin it: right-click › "Pin to taskbar" (Windows 11: "Show more options" first), or drag it onto the taskbar. Windows gives programs no way to pin themselves, so this last click stays yours.
+- The shortcut points to the application where it is installed: updates replace the file in place, so it keeps working. If you move the application, create the shortcut again.
+- From source, the shortcut runs `pythonw.exe closeallpython.py` with the same options.
+
 ## 1.6.0 (2026-10-16)
 
 Updates from GitHub
@@ -88,6 +96,14 @@ Project
 ---
 
 # Journal des modifications (version française)
+
+## 1.7.0 (2026-10-17)
+
+Raccourci « Tout fermer »
+- Nouvelle section **Raccourci** dans les paramètres : *Créer le raccourci* place un raccourci « Tout fermer » sur le Bureau. Son exécution lance l'application sans aucune fenêtre (`--no-ui --all -y`) et ferme instantanément de force toutes les fenêtres ouvertes, sans confirmation ; les processus protégés de Windows restent ignorés. Le travail non enregistré est perdu, comme l'indique la section.
+- *Épingler à la barre des tâches…* affiche le raccourci dans l'Explorateur de fichiers avec les étapes pour l'épingler : clic droit › « Épingler à la barre des tâches » (Windows 11 : « Afficher plus d'options » d'abord), ou glisser-déposer sur la barre des tâches. Windows ne permet pas à un programme de s'épingler lui-même : ce dernier clic reste à vous.
+- Le raccourci pointe vers l'application à son emplacement d'installation : les mises à jour remplacent le fichier sur place, il continue donc de fonctionner. Si vous déplacez l'application, recréez le raccourci.
+- Depuis les sources, le raccourci exécute `pythonw.exe closeallpython.py` avec les mêmes options.
 
 ## 1.6.0 (2026-10-16)
 

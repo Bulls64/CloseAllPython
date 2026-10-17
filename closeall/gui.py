@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 
 import customtkinter as ctk
 
-from . import __version__, appicon, core, crash, settings as settings_mod, updater, winapi
+from . import __version__, appicon, core, crash, settings as settings_mod, shortcut, updater, winapi
 from .gui_theme import (ACCENT, ACCENT_HOVER, C, WARN_FILL, WARN_FILL_HOVER, WARN_ON, WHITE, Fonts,
                         tile_color, tile_letter)
 from .i18n import LANGUAGE_NAMES, format_seconds, translate, translate_n
@@ -992,6 +992,43 @@ class SettingsPage(ctk.CTkFrame):
         app.updates.on_status = self._show_update_status
         self._show_update_status()
 
+        link = self._section(grid, t("section_shortcut"), 2, 0, columnspan=2)
+        label(link, t("shortcut_hint"), app.fonts.small, "muted", wraplength=640).pack(fill="x")
+        line = ctk.CTkFrame(link, fg_color="transparent")
+        line.pack(fill="x", pady=(12, 0))
+        ghost_button(line, app, t("shortcut_create"), self._create_shortcut).pack(side="left")
+        self.pin_button = ghost_button(line, app, t("shortcut_pin"), self._pin_shortcut)
+        self.pin_button.pack(side="left", padx=(8, 0))
+        self.shortcut_status = label(link, "", app.fonts.small, "muted", wraplength=640)
+        self.shortcut_status.pack(fill="x", pady=(8, 0))
+        self.shortcut_file = shortcut.find(t("shortcut_name"))
+        self._show_shortcut_status()
+
+    def _show_shortcut_status(self):
+        file = self.shortcut_file
+        self.shortcut_status.configure(text=self.app.t("shortcut_ready", path=file) if file else "")
+        self.pin_button.configure(state="normal" if file else "disabled")
+
+    def _create_shortcut(self):
+        t = self.app.t
+        try:
+            self.shortcut_file = shortcut.create(t("shortcut_name"), t("shortcut_description"))
+        except shortcut.ShortcutError as exc:
+            Dialog(self.app, t("error"), t("shortcut_failed", error=exc.detail))
+            return
+        self._show_shortcut_status()
+
+    def _pin_shortcut(self):
+        t = self.app.t
+        Dialog(self.app, t("shortcut_pin_title"), t("shortcut_pin_message"), confirm_text=t("shortcut_show"),
+               on_confirm=self._show_shortcut_file, cancel_text=t("ok"))
+
+    def _show_shortcut_file(self):
+        try:
+            shortcut.reveal(self.shortcut_file)
+        except OSError as exc:
+            Dialog(self.app, self.app.t("error"), self.app.t("shortcut_failed", error=exc.strerror or exc))
+
     def _show_update_status(self):
         updates = self.app.updates
         try:
@@ -1000,10 +1037,10 @@ class SettingsPage(ctk.CTkFrame):
         except tk.TclError:
             pass   # page destroyed (language change): the new page registers itself
 
-    def _section(self, grid, title, row, column):
+    def _section(self, grid, title, row, column, columnspan=1):
         box = ctk.CTkFrame(grid, fg_color=C["surface"], border_color=C["border"], border_width=1, corner_radius=12)
-        box.grid(row=row, column=column, sticky="nsew", padx=(0 if column == 0 else 8, 8 if column == 0 else 0),
-                 pady=(0, 16))
+        padx = (0, 0) if columnspan > 1 else (0 if column == 0 else 8, 8 if column == 0 else 0)
+        box.grid(row=row, column=column, columnspan=columnspan, sticky="nsew", padx=padx, pady=(0, 16))
         inner = ctk.CTkFrame(box, fg_color="transparent")
         inner.pack(fill="both", expand=True, padx=20, pady=18)
         label(inner, title, self.app.fonts.h2).pack(fill="x", pady=(0, 12))
