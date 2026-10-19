@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 from ctypes import wintypes
+from dataclasses import dataclass
 
 import win32gui
 import win32process
@@ -16,6 +17,7 @@ kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
 shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+ntdll = ctypes.WinDLL("ntdll")
 try:
     dwmapi = ctypes.WinDLL("dwmapi")
 except OSError:  # pragma: no cover - DWM is always present on supported Windows versions
@@ -65,6 +67,54 @@ class PROCESSENTRY32W(ctypes.Structure):
     ]
 
 
+class UNICODE_STRING(ctypes.Structure):
+    _fields_ = [("Length", wintypes.USHORT), ("MaximumLength", wintypes.USHORT), ("Buffer", ctypes.c_void_p)]
+
+
+class SYSTEM_PROCESS_INFORMATION(ctypes.Structure):
+    """Leading part of the record NtQuerySystemInformation returns per process (winternl.h)."""
+    _fields_ = [
+        ("NextEntryOffset", wintypes.ULONG),
+        ("NumberOfThreads", wintypes.ULONG),
+        ("WorkingSetPrivateSize", ctypes.c_longlong),
+        ("HardFaultCount", wintypes.ULONG),
+        ("NumberOfThreadsHighWatermark", wintypes.ULONG),
+        ("CycleTime", ctypes.c_ulonglong),
+        ("CreateTime", ctypes.c_longlong),
+        ("UserTime", ctypes.c_longlong),
+        ("KernelTime", ctypes.c_longlong),
+        ("ImageName", UNICODE_STRING),
+        ("BasePriority", ctypes.c_long),
+        ("UniqueProcessId", ctypes.c_void_p),
+        ("InheritedFromUniqueProcessId", ctypes.c_void_p),
+        ("HandleCount", wintypes.ULONG),
+        ("SessionId", wintypes.ULONG),
+        ("UniqueProcessKey", ctypes.c_size_t),
+        ("PeakVirtualSize", ctypes.c_size_t),
+        ("VirtualSize", ctypes.c_size_t),
+        ("PageFaultCount", wintypes.ULONG),
+        ("PeakWorkingSetSize", ctypes.c_size_t),
+        ("WorkingSetSize", ctypes.c_size_t),
+        ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+        ("QuotaPagedPoolUsage", ctypes.c_size_t),
+        ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+        ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+        ("PagefileUsage", ctypes.c_size_t),
+        ("PeakPagefileUsage", ctypes.c_size_t),
+        ("PrivatePageCount", ctypes.c_size_t),
+    ]
+
+
+@dataclass(frozen=True)
+class SystemProcess:
+    pid: int
+    ppid: int
+    name: str            # image name ("OneDrive.exe"); "" for the idle process
+    created: int         # same FILETIME value as creation_time()
+    private_memory: int  # private working set in bytes (the Task Manager's "Memory" column)
+    working_set: int
+
+
 class BITMAPINFOHEADER(ctypes.Structure):
     _fields_ = [
         ("biSize", wintypes.DWORD),
@@ -105,6 +155,8 @@ _proto(kernel32.QueryFullProcessImageNameW, wintypes.BOOL, wintypes.HANDLE, wint
 _proto(kernel32.CreateToolhelp32Snapshot, wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD)
 _proto(kernel32.Process32FirstW, wintypes.BOOL, wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W))
 _proto(kernel32.Process32NextW, wintypes.BOOL, wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W))
+_proto(ntdll.NtQuerySystemInformation, ctypes.c_ulong, wintypes.ULONG, ctypes.c_void_p, wintypes.ULONG,
+       ctypes.POINTER(wintypes.ULONG))
 _proto(kernel32.GetConsoleWindow, wintypes.HWND)
 _proto(user32.InternalGetWindowText, ctypes.c_int, wintypes.HWND, wintypes.LPWSTR, ctypes.c_int)
 _proto(user32.SendMessageTimeoutW, wintypes.LPARAM, wintypes.HWND, wintypes.UINT, wintypes.WPARAM,
@@ -238,6 +290,38 @@ def process_table():
     finally:
         close_handle(snapshot)
     return table
+
+
+SYSTEM_PROCESS_INFORMATION_CLASS = 5
+STATUS_INFO_LENGTH_MISMATCH = 0xC0000004
+
+
+def system_processes():
+    """Every running process with its memory use, read in one call that needs no access to the
+    processes themselves (so it also covers services and other users' processes)."""
+    size = 512 * 1024
+    for _ in range(8):   # the list can grow between the size query and the read
+        buffer = ctypes.create_string_buffer(size)
+        needed = wintypes.ULONG(0)
+        status = ntdll.NtQuerySystemInformation(SYSTEM_PROCESS_INFORMATION_CLASS, buffer, size, ctypes.byref(needed))
+        if status == STATUS_INFO_LENGTH_MISMATCH:
+            size = max(size * 2, needed.value + 64 * 1024)
+            continue
+        if status:
+            raise OSError(f"NtQuerySystemInformation failed (status 0x{status:08X})")
+        break
+    else:
+        raise OSError("the process list keeps growing")
+    processes, offset = [], 0
+    while True:
+        info = SYSTEM_PROCESS_INFORMATION.from_buffer(buffer, offset)
+        image = info.ImageName
+        name = ctypes.wstring_at(image.Buffer, image.Length // 2) if image.Buffer and image.Length else ""
+        processes.append(SystemProcess(info.UniqueProcessId or 0, info.InheritedFromUniqueProcessId or 0, name,
+                                       info.CreateTime, max(0, info.WorkingSetPrivateSize), info.WorkingSetSize))
+        if not info.NextEntryOffset:
+            return processes
+        offset += info.NextEntryOffset
 
 
 def console_window():

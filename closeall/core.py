@@ -179,6 +179,62 @@ def group_targets(windows):
     return sorted(targets.values(), key=lambda t: (t.app_name.casefold(), t.pid))
 
 
+# Kernel and memory-manager entries of the process list: part of Windows, no executable file.
+SYSTEM_IMAGE_NAMES = frozenset({"", "system", "secure system", "registry", "memory compression", "memcompression"})
+BACKGROUND_LIMIT = 10
+
+
+@dataclass(frozen=True)
+class BackgroundProcess:
+    pid: int
+    name: str           # image name ("OneDrive.exe")
+    memory: int         # private working set, bytes
+    exe_path: str | None
+    protected: bool     # part of Windows
+
+    @property
+    def app_name(self):
+        return ntpath.splitext(self.name)[0] or self.name
+
+
+@dataclass(frozen=True)
+class BackgroundReport:
+    top: list           # the BackgroundProcess using the most memory, largest first
+    count: int          # background processes counted
+    total: int          # their memory, bytes
+
+
+def background_processes(windows, include_system=False, limit=BACKGROUND_LIMIT):
+    """The processes running without any window, those using the most memory first.
+
+    A process is in the background when no window of `windows` belongs to it or to another
+    process of the same executable (a browser's helper processes stay with the browser).
+    Memory is the private working set, the Task Manager's "Memory" column. Processes that are
+    part of Windows are left out unless `include_system`.
+    """
+    processes = winapi.system_processes()
+    windowed_pids = {w.pid for w in windows} | {w.hwnd_pid for w in windows}
+    windowed_names = {_exe_name(w.exe_path) for w in windows if w.exe_path}
+    windowed_names |= {p.name.lower() for p in processes if p.pid in windowed_pids}
+    found = []
+    for p in processes:
+        name = p.name.lower()
+        if p.pid == 0 or p.pid in windowed_pids or name in windowed_names:
+            continue
+        protected = p.pid in SYSTEM_PIDS or name in PROTECTED_EXECUTABLES or name in SYSTEM_IMAGE_NAMES
+        if protected and not include_system:
+            continue
+        found.append((p, protected))
+    found.sort(key=lambda item: (-item[0].private_memory, item[0].name.casefold(), item[0].pid))
+    top = []
+    for p, protected in found[:limit]:
+        path, created = winapi.process_info(p.pid) if p.name.lower() not in SYSTEM_IMAGE_NAMES else (None, 0)
+        if created and p.created and created != p.created:
+            path = None   # the PID was reused in between: do not show another program's path
+        top.append(BackgroundProcess(p.pid, p.name or f"PID {p.pid}", p.private_memory, path, protected))
+    return BackgroundReport(top, len(found), sum(p.private_memory for p, _ in found))
+
+
 def truncate(items, limit):
     """Return (first `limit` items, number left out)."""
     items = list(items)

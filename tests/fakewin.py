@@ -1,7 +1,11 @@
 """In-memory stand-in for closeall.winapi so the logic can be tested on any OS."""
+import ntpath
 import os
 import sys
 import types
+from collections import namedtuple
+
+SystemProcess = namedtuple("SystemProcess", "pid ppid name created private_memory working_set")
 
 
 class FakeWinError(OSError):
@@ -21,9 +25,10 @@ class FakeSystem:
         self.console = 0
         self.calls = []   # ("terminate" | "wait", pid), in call order
 
-    def add_process(self, pid, path, created=1000, ppid=0, exits_on_close=True, deny=False):
+    def add_process(self, pid, path, created=1000, ppid=0, exits_on_close=True, deny=False, memory=0, name=None):
         self.processes[pid] = {"path": path, "created": created, "ppid": ppid, "alive": True,
-                               "exits_on_close": exits_on_close, "deny": deny}
+                               "exits_on_close": exits_on_close, "deny": deny, "memory": memory,
+                               "name": name if name is not None else ntpath.basename(path or "")}
 
     def add_window(self, hwnd, pid, title, task=True, cls="", visible=True):
         self.windows.append({"hwnd": hwnd, "pid": pid, "title": title, "task": task, "cls": cls, "visible": visible})
@@ -85,6 +90,8 @@ class FakeSystem:
         mod.terminate = terminate
         mod.process_info = process_info
         mod.process_table = lambda: {pid: (p["ppid"], os.path.basename(p["path"] or "")) for pid, p in system.processes.items()}
+        mod.system_processes = lambda: [SystemProcess(pid, p["ppid"], p["name"], p["created"], p["memory"], p["memory"])
+                                        for pid, p in system.processes.items() if p["alive"]]
         mod.console_window = lambda: system.console
         mod.top_level_windows = top_level_windows
         mod.is_task_window = lambda hwnd: system._window(hwnd)["task"]

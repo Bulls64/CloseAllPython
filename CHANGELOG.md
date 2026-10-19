@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.8.0 (2026-10-19)
+
+Background processes
+- New **Background** screen (in the left bar): the 10 processes without any window that use the most memory, largest first, with their icon, name, PID, memory and a bar to compare them. The summary gives how many background processes run and how much memory they use in all.
+- Memory is the private working set, the "Memory" column of the Task Manager. It is read in one system call that needs no access to the processes, so services and protected processes are measured too, without administrator rights.
+- Helper processes of an application that has a window stay with that application (a browser's or Steam's helpers are not listed while its window is open).
+- Windows processes (Memory Compression, Explorer, svchost...) are left out by default; the *Include Windows processes* switch shows them, greyed and tagged "Windows". The choice is saved.
+- The list is read each time the screen opens and with *Refresh*. It only lists: nothing is closed from this screen.
+
 ## 1.7.0 (2026-10-17)
 
 "Close everything" shortcut
@@ -96,6 +105,15 @@ Project
 ---
 
 # Journal des modifications (version française)
+
+## 1.8.0 (2026-10-19)
+
+Processus en arrière-plan
+- Nouvel écran **Arrière-plan** (barre de gauche) : les 10 processus sans aucune fenêtre qui utilisent le plus de mémoire, du plus gros au plus petit, avec icône, nom, PID, mémoire et une barre pour les comparer. Le résumé indique combien de processus tournent en arrière-plan et la mémoire qu'ils utilisent au total.
+- La mémoire est le jeu de travail privé, la colonne « Mémoire » du Gestionnaire des tâches. Elle est lue en un seul appel système qui ne demande aucun accès aux processus : les services et processus protégés sont donc mesurés aussi, sans droits administrateur.
+- Les processus annexes d'une application qui a une fenêtre restent avec cette application (ceux d'un navigateur ou de Steam ne sont pas listés tant que sa fenêtre est ouverte).
+- Les processus de Windows (Memory Compression, Explorateur, svchost…) sont exclus par défaut ; l'interrupteur *Inclure les processus de Windows* les affiche, grisés et marqués « Windows ». Le choix est enregistré.
+- La liste est lue à chaque ouverture de l'écran et avec *Actualiser*. Elle sert uniquement à consulter : rien n'est fermé depuis cet écran.
 
 ## 1.7.0 (2026-10-17)
 

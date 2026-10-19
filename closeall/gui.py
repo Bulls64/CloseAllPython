@@ -16,7 +16,7 @@ import customtkinter as ctk
 from . import __version__, appicon, core, crash, settings as settings_mod, shortcut, updater, winapi
 from .gui_theme import (ACCENT, ACCENT_HOVER, C, WARN_FILL, WARN_FILL_HOVER, WARN_ON, WHITE, Fonts,
                         tile_color, tile_letter)
-from .i18n import LANGUAGE_NAMES, format_seconds, translate, translate_n
+from .i18n import LANGUAGE_NAMES, format_memory, format_seconds, translate, translate_n
 
 log = logging.getLogger(settings_mod.LOGGER_NAME)
 
@@ -916,6 +916,95 @@ class LogPage(ctk.CTkFrame):
             os.startfile(path)  # noqa: S606 - opens the log in the user's default text editor
 
 
+# ====================================================================== background
+
+class BackgroundPage(ctk.CTkFrame):
+    """The background processes (no window) using the most memory."""
+
+    def __init__(self, app):
+        super().__init__(app, fg_color=C["bg"], corner_radius=0)
+        self.app = app
+        t = app.t
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(2, weight=1)
+        header = ctk.CTkFrame(self, fg_color="transparent")
+        header.grid(row=0, column=0, sticky="ew", padx=28, pady=(22, 10))
+        titles = ctk.CTkFrame(header, fg_color="transparent")
+        titles.pack(side="left", fill="x", expand=True)
+        label(titles, t("background_title"), app.fonts.title).pack(fill="x")
+        self.summary = label(titles, "", app.fonts.body, "muted")
+        self.summary.pack(fill="x", pady=(2, 0))
+        ghost_button(header, app, t("refresh"), self.load).pack(side="right", anchor="n")
+
+        options = ctk.CTkFrame(self, fg_color="transparent")
+        options.grid(row=1, column=0, sticky="ew", padx=28, pady=(0, 12))
+        self.include_system = ctk.BooleanVar(value=app.settings["background_include_system"])
+        ctk.CTkSwitch(options, text=t("background_include_system"), variable=self.include_system,
+                      command=self._on_include_system, font=app.fonts.body, text_color=C["text"],
+                      switch_width=40, switch_height=22, progress_color=ACCENT, button_color=WHITE,
+                      button_hover_color="#f0f2f5", fg_color=("#b8c0cc", "#4a505c")).pack(fill="x")
+        self.hint = label(options, t("background_hint"), app.fonts.small, "muted", wraplength=680)
+        self.hint.pack(fill="x", pady=(6, 0))
+
+        self.list = ctk.CTkScrollableFrame(self, fg_color=C["bg"], corner_radius=0, scrollbar_button_color=C["scroll"],
+                                           scrollbar_button_hover_color=C["scroll_hover"])
+        self.list.grid(row=2, column=0, sticky="nsew", padx=(20, 8), pady=(0, 20))
+        self.report = None
+
+    def _on_include_system(self):
+        self.app.update_settings(background_include_system=bool(self.include_system.get()))
+        self.load()
+
+    def load(self):
+        app, t = self.app, self.app.t
+        for child in self.list.winfo_children():
+            child.destroy()
+        try:
+            self.report = core.background_processes(core.list_windows(),
+                                                    include_system=app.settings["background_include_system"])
+        except OSError as exc:
+            self.report = None
+            self.summary.configure(text=t("background_error", error=exc))
+            return
+        report = self.report
+        if not report.top:
+            self.summary.configure(text=t("background_empty"))
+            return
+        self.summary.configure(text=app.tn("background_summary", report.count, shown=len(report.top),
+                                           total=format_memory(app.language, report.total)))
+        largest = max(report.top[0].memory, 1)
+        app.preload_icons(p.exe_path for p in report.top)
+        for rank, process in enumerate(report.top, 1):
+            self._row(rank, process, largest)
+
+    def _row(self, rank, process, largest):
+        app = self.app
+        card = ctk.CTkFrame(self.list, fg_color=C["surface"], border_color=C["border"], border_width=1, corner_radius=10)
+        card.pack(fill="x", padx=8, pady=(0, 8))
+        row = ctk.CTkFrame(card, fg_color="transparent")
+        row.pack(fill="x", padx=12, pady=8)
+        label(row, str(rank), app.fonts.mono, "faint", width=24, anchor="e").pack(side="left", padx=(0, 12))
+        name = app.display_name(process.exe_path) if process.exe_path else process.app_name
+        box = tile(row, app, name, None, process.protected)
+        box.pack(side="left", padx=(0, 14), pady=2)
+        if process.exe_path and app.settings["show_icons"]:
+            set_tile_icon(box, app.icon_for(process.exe_path, on_ready=lambda image, box=box: set_tile_icon(box, image)))
+        memory = ctk.CTkFrame(row, fg_color="transparent", width=170)
+        memory.pack(side="right", padx=(12, 4))
+        label(memory, format_memory(app.language, process.memory), app.fonts.body_bold, anchor="e").pack(fill="x")
+        bar = ctk.CTkProgressBar(memory, width=160, height=6, corner_radius=3, progress_color=ACCENT,
+                                 fg_color=C["inset"])
+        bar.set(process.memory / largest)
+        bar.pack(pady=(4, 2))
+        texts = ctk.CTkFrame(row, fg_color="transparent")
+        texts.pack(side="left", fill="x", expand=True)
+        label(texts, name, app.fonts.name, "muted" if process.protected else "text").pack(fill="x")
+        meta = f"{process.name} · {app.t('pid', pid=process.pid)}"
+        if process.protected:
+            meta += f" · {app.t('background_windows')}"
+        label(texts, meta, app.fonts.small, "faint" if process.protected else "muted").pack(fill="x")
+
+
 # ====================================================================== settings
 
 class SettingsPage(ctk.CTkFrame):
@@ -1392,14 +1481,17 @@ class App(ctk.CTk):
         self.rail.grid_propagate(False)
         self.nav = {
             "apps": NavButton(self.rail, self, "apps", "apps", self.t("nav_apps")),
+            "background": NavButton(self.rail, self, "background", "memory", self.t("nav_background")),
             "log": NavButton(self.rail, self, "log", "log", self.t("nav_log")),
             "settings": NavButton(self.rail, self, "settings", "settings", self.t("nav_settings")),
         }
         self.nav["apps"].pack(pady=(14, 4))
+        self.nav["background"].pack(pady=4)
         self.nav["log"].pack(pady=4)
         self.nav["settings"].pack(side="bottom", pady=14)
         self.list_page = ListPage(self, state)
-        self.pages = {"apps": self.list_page, "closing": ClosingPage(self), "log": LogPage(self),
+        self.pages = {"apps": self.list_page, "closing": ClosingPage(self), "background": BackgroundPage(self),
+                      "log": LogPage(self),
                       "settings": SettingsPage(self)}
         for page in self.pages.values():
             page.grid(row=0, column=1, sticky="nsew")
@@ -1412,6 +1504,8 @@ class App(ctk.CTk):
         self.current = name
         if name == "log":
             self.pages["log"].load()
+        elif name == "background":
+            self.pages["background"].load()
         self.pages[name].tkraise()
         for key, button in self.nav.items():
             button.set_active(key == name or (name == "closing" and key == "apps"))

@@ -36,6 +36,7 @@ CloseAllPython lists the windows you see in Alt+Tab and closes the applications 
 - **Close Explorer windows.** Closes every File Explorer folder window (all tabs) while the desktop and taskbar keep running.
 - **Live list.** The list refreshes by itself after a closing; icons load in the background.
 - **Updates from GitHub.** *Check for updates* in the settings, or turn on the automatic update at startup; each download is verified against the SHA-256 checksum published by GitHub before it replaces the program.
+- **Background memory.** The 10 windowless processes using the most memory, measured like the Task Manager, even without administrator rights.
 - **"Close everything" shortcut.** One click in the settings creates a desktop shortcut that instantly closes every open window, ready to pin to the taskbar.
 - **Command line.** Scriptable `--no-ui` mode with dry run, filters and exit codes.
 - **Logged.** Every action goes to a log file; unexpected errors are shown and saved to `crash.txt`.
@@ -74,6 +75,8 @@ To close applications that run as administrator, use **Administrator mode** in t
 Closing an application closes all of its windows. The **Log** screen shows the latest actions; **Settings** are saved automatically.
 
 **Updates.** In **Settings › About**, *Check for updates* compares your version with the latest GitHub release and offers to install it; the application then restarts on the new version. With *Update automatically at startup* (off by default), the check runs each time the application opens and a new version is installed in the background, used from the next start or right away if you choose to restart. The application contacts GitHub only for these checks. If it sits in a folder you cannot write to (such as `Program Files`), download the new version from the release page instead.
+
+**Background processes.** The **Background** screen lists the 10 processes without any window that use the most memory (private working set, the Task Manager's "Memory" column), with the number of background processes and their total memory. Helper processes of an application that has a window stay with it. Windows processes are hidden unless you turn on *Include Windows processes*. This screen only lists; nothing is closed from it.
 
 **"Close everything" shortcut.** In **Settings › Shortcut**, *Create the shortcut* adds a "Close everything" shortcut to your desktop. It runs `--no-ui --all -y`: no window, no confirmation, every open window force-closed at once (protected Windows processes are skipped), so unsaved work is lost. *Pin to the taskbar…* shows the shortcut in File Explorer: right-click it and choose **Pin to taskbar** (Windows 11: **Show more options** first), or drag it onto the taskbar. Windows does not let a program pin itself, so that last click is yours. If you move the application, create the shortcut again.
 
@@ -173,6 +176,7 @@ CloseAllPython liste les fenêtres visibles dans Alt+Tab et ferme les applicatio
 - **Fermer les fenêtres de l'Explorateur.** Ferme toutes les fenêtres de dossiers de l'Explorateur de fichiers (tous les onglets) ; le bureau et la barre des tâches continuent de fonctionner.
 - **Liste en direct.** La liste s'actualise toute seule après une fermeture ; les icônes se chargent en arrière-plan.
 - **Mises à jour depuis GitHub.** *Rechercher des mises à jour* dans les paramètres, ou activez la mise à jour automatique au démarrage ; chaque téléchargement est vérifié avec l'empreinte SHA-256 publiée par GitHub avant de remplacer le programme.
+- **Mémoire en arrière-plan.** Les 10 processus sans fenêtre qui utilisent le plus de mémoire, mesurés comme dans le Gestionnaire des tâches, même sans droits administrateur.
 - **Raccourci « Tout fermer ».** Un clic dans les paramètres crée sur le Bureau un raccourci qui ferme instantanément toutes les fenêtres ouvertes, prêt à être épinglé à la barre des tâches.
 - **Ligne de commande.** Mode `--no-ui` utilisable dans des scripts, avec simulation, filtres et codes de sortie.
 - **Journalisé.** Chaque action est inscrite dans un journal ; les erreurs inattendues sont affichées et enregistrées dans `crash.txt`.
@@ -207,6 +211,8 @@ Pour fermer des applications lancées en administrateur, utilisez **Mode adminis
 Fermer une application ferme toutes ses fenêtres. L'écran **Journal** affiche les dernières actions ; les **Paramètres** sont enregistrés automatiquement.
 
 **Mises à jour.** Dans **Paramètres › À propos**, *Rechercher des mises à jour* compare votre version avec la dernière release GitHub et propose de l'installer ; l'application redémarre alors sur la nouvelle version. Avec *Mettre à jour automatiquement au démarrage* (désactivé par défaut), la vérification a lieu à chaque ouverture et une nouvelle version s'installe en arrière-plan, utilisée au démarrage suivant ou tout de suite si vous choisissez de redémarrer. L'application ne contacte GitHub que pour ces vérifications. Si elle se trouve dans un dossier où vous ne pouvez pas écrire (comme `Program Files`), téléchargez la nouvelle version sur la page de la release.
+
+**Processus en arrière-plan.** L'écran **Arrière-plan** liste les 10 processus sans aucune fenêtre qui utilisent le plus de mémoire (jeu de travail privé, la colonne « Mémoire » du Gestionnaire des tâches), avec le nombre de processus en arrière-plan et leur mémoire totale. Les processus annexes d'une application qui a une fenêtre restent avec elle. Les processus de Windows sont masqués sauf si vous activez *Inclure les processus de Windows*. Cet écran sert uniquement à consulter : rien n'est fermé depuis lui.
 
 **Raccourci « Tout fermer ».** Dans **Paramètres › Raccourci**, *Créer le raccourci* ajoute un raccourci « Tout fermer » sur votre Bureau. Il exécute `--no-ui --all -y` : aucune fenêtre, aucune confirmation, toutes les fenêtres ouvertes sont fermées de force d'un coup (les processus protégés de Windows sont ignorés), donc le travail non enregistré est perdu. *Épingler à la barre des tâches…* affiche le raccourci dans l'Explorateur de fichiers : faites un clic droit dessus et choisissez **Épingler à la barre des tâches** (Windows 11 : **Afficher plus d'options** d'abord), ou glissez-le sur la barre des tâches. Windows ne permet pas à un programme de s'épingler lui-même : ce dernier clic est à vous. Si vous déplacez l'application, recréez le raccourci.
 

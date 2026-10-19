@@ -175,6 +175,17 @@ TEXT = {
         "shortcut_pin_title": "Pin to the taskbar",
         "shortcut_pin_message": "Windows does not let a program pin itself, so one step is left for you. Show the shortcut, right-click it and choose “Pin to taskbar” (Windows 11: “Show more options” first). You can also drag it onto the taskbar.",
         "shortcut_show": "Show the shortcut",
+        "nav_background": "Background",
+        "background_title": "Background processes",
+        "background_summary_one": "The {shown} using the most memory · {count} process without a window, {total} in all",
+        "background_summary_many": "The {shown} using the most memory · {count} processes without a window, {total} in all",
+        "background_include_system": "Include Windows processes",
+        "background_hint": "Processes without any open window, sorted by memory (private working set, as in the Task Manager). Helper processes of an application that has a window stay with that application.",
+        "background_empty": "No background process found.",
+        "background_error": "The process list cannot be read: {error}",
+        "background_windows": "Windows",
+        "memory_mb": "{value} MB",
+        "memory_gb": "{value} GB",
         "check_updates": "Check for updates",
         "update_checking": "Checking for updates…",
         "update_latest": "Up to date (version {version})",
@@ -370,6 +381,17 @@ TEXT = {
         "shortcut_pin_title": "Épingler à la barre des tâches",
         "shortcut_pin_message": "Windows ne permet pas à un programme de s’épingler lui-même : il reste une étape à faire. Affichez le raccourci, faites un clic droit dessus et choisissez « Épingler à la barre des tâches » (Windows 11 : « Afficher plus d’options » d’abord). Vous pouvez aussi le glisser sur la barre des tâches.",
         "shortcut_show": "Afficher le raccourci",
+        "nav_background": "Arrière-plan",
+        "background_title": "Processus en arrière-plan",
+        "background_summary_one": "Les {shown} qui utilisent le plus de mémoire · {count} processus sans fenêtre, {total} au total",
+        "background_summary_many": "Les {shown} qui utilisent le plus de mémoire · {count} processus sans fenêtre, {total} au total",
+        "background_include_system": "Inclure les processus de Windows",
+        "background_hint": "Processus sans aucune fenêtre ouverte, triés par mémoire (jeu de travail privé, comme dans le Gestionnaire des tâches). Les processus annexes d’une application qui a une fenêtre restent avec cette application.",
+        "background_empty": "Aucun processus en arrière-plan trouvé.",
+        "background_error": "Impossible de lire la liste des processus : {error}",
+        "background_windows": "Windows",
+        "memory_mb": "{value} Mo",
+        "memory_gb": "{value} Go",
         "check_updates": "Rechercher des mises à jour",
         "update_checking": "Recherche de mises à jour…",
         "update_latest": "À jour (version {version})",
@@ -423,3 +445,19 @@ def format_seconds(language, value):
     """1.2 -> '1.2' in English, '1,2' in French."""
     text = f"{value:.1f}".rstrip("0").rstrip(".")
     return text.replace(".", ",") if language == "fr" else text
+
+
+def format_memory(language, size):
+    """Bytes in the Task Manager's units: '412 MB' / '1,3 Go' (binary multiples)."""
+    megabytes = size / (1024 * 1024)
+    if megabytes >= 1024:
+        return translate(language, "memory_gb", value=_decimal(language, megabytes / 1024))
+    if megabytes >= 10 or megabytes == 0:
+        return translate(language, "memory_mb", value=str(round(megabytes)))
+    return translate(language, "memory_mb", value=_decimal(language, megabytes))
+
+
+def _decimal(language, value):
+    text = f"{value:.1f}"
+    return text.replace(".", ",") if language == "fr" else text
+
