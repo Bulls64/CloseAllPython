@@ -379,8 +379,19 @@ class ListPage(ctk.CTkFrame):
         self.close_button = primary_button(bar, app, "", self.close_selected)
         self.close_button.pack(side="right", padx=(0, 28))
         self.clear_button = ghost_button(bar, app, t("clear_selection"), self.clear_selection, height=44)
-        self.explorer_button = ghost_button(bar, app, t("close_explorer"), self.close_explorer, height=44)
-        self.explorer_button.pack(side="right", padx=(0, 10))
+        # File Explorer actions, side by side under a small caption.
+        explorer = ctk.CTkFrame(bar, fg_color="transparent")
+        explorer.pack(side="right", padx=(0, 16), pady=(8, 10))
+        label(explorer, t("explorer_group"), app.fonts.small, "muted").pack(fill="x")
+        explorer_buttons = ctk.CTkFrame(explorer, fg_color="transparent")
+        explorer_buttons.pack(fill="x", pady=(2, 0))
+        self.explorer_button = ghost_button(explorer_buttons, app, t("close_explorer_short"), self.close_explorer,
+                                            height=36, width=100)
+        self.explorer_button.pack(side="left")
+        self.restart_explorer_button = ghost_button(explorer_buttons, app, t("restart_explorer_short"),
+                                                    self.restart_explorer, height=36, width=100)
+        self.restart_explorer_button.pack(side="left", padx=(8, 0))
+        self.restarting_explorer = False
         # Packed after the buttons: they keep their full width and the texts take what is left.
         texts.pack(side="left", fill="x", expand=True, padx=28, pady=14)
         texts.bind("<Configure>", self._wrap_bar_texts)
@@ -588,6 +599,57 @@ class ListPage(ctk.CTkFrame):
         self.notice_job = self.after(NOTICE_MS, self._end_notice)
         self.update_counts()
         self.schedule_refreshes(EXPLORER_REFRESH_MS)
+
+    def restart_explorer(self):
+        """Restart explorer.exe (desktop, taskbar, folder windows), after a confirmation."""
+        app, t = self.app, self.app.t
+        if app.busy or self.restarting_explorer:
+            return
+        Dialog(app, t("restart_explorer_title"), t("restart_explorer_message"),
+               confirm_text=t("restart_explorer_confirm"), on_confirm=self._start_explorer_restart)
+
+    def _start_explorer_restart(self):
+        app = self.app
+        self.restarting_explorer = True
+        for button in (self.explorer_button, self.restart_explorer_button):
+            button.configure(state="disabled")
+        self._show_notice(app.t("explorer_restarting"), keep=True)
+
+        def run():
+            try:
+                core.restart_explorer()
+            except core.ProcessError as exc:
+                app.call_soon(lambda error=exc: self._explorer_restarted(error))
+            except Exception as exc:   # never leave the buttons disabled
+                log.exception("explorer restart failed")
+                app.call_soon(lambda error=core.ProcessError("os_error", str(exc)): self._explorer_restarted(error))
+            else:
+                app.call_soon(lambda: self._explorer_restarted(None))
+        threading.Thread(target=run, name="explorer-restart", daemon=True).start()
+
+    def _explorer_restarted(self, error):
+        app, t = self.app, self.app.t
+        self.restarting_explorer = False
+        try:
+            for button in (self.explorer_button, self.restart_explorer_button):
+                button.configure(state="normal")
+        except tk.TclError:
+            return   # page rebuilt meanwhile (language change)
+        if error is None:
+            self._show_notice(t("explorer_restarted"))
+            self.schedule_refreshes(EXPLORER_REFRESH_MS)
+        else:
+            self._show_notice(None)
+            Dialog(app, t("error"), t("explorer_restart_failed", error=t(error.key, detail=error.detail or "")))
+
+    def _show_notice(self, text, keep=False):
+        if self.notice_job is not None:
+            self.after_cancel(self.notice_job)
+            self.notice_job = None
+        self.notice = text
+        if text and not keep:
+            self.notice_job = self.after(NOTICE_MS, self._end_notice)
+        self.update_counts()
 
     def _end_notice(self):
         self.notice_job, self.notice = None, None

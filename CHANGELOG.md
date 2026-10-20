@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.9.0 (2026-10-20)
+
+Restart File Explorer
+- New **Restart** button in the bottom bar of the application list, next to the button that closes File Explorer windows; both now sit together under a "File Explorer" caption with shorter labels, so the bar keeps room at small window sizes.
+- After a confirmation, every explorer.exe of your Windows session is stopped (other users' sessions are not touched). Windows restarts the shell by itself, as your own process; if it has not done so after 8 seconds, the application starts explorer.exe. The taskbar and desktop disappear for a few seconds and File Explorer windows are closed; other applications keep running.
+- The status bar shows the progress and the result; the list refreshes afterwards. The restart is written to the log.
+
 ## 1.8.0 (2026-10-19)
 
 Background processes
@@ -105,6 +112,13 @@ Project
 ---
 
 # Journal des modifications (version française)
+
+## 1.9.0 (2026-10-20)
+
+Redémarrer l'Explorateur de fichiers
+- Nouveau bouton **Redémarrer** dans la barre du bas de la liste des applications, à côté du bouton qui ferme les fenêtres de l'Explorateur ; les deux sont maintenant regroupés sous le titre « Explorateur de fichiers » avec des libellés plus courts, pour garder de la place quand la fenêtre est petite.
+- Après confirmation, tous les explorer.exe de votre session Windows sont arrêtés (les sessions des autres utilisateurs ne sont pas touchées). Windows relance le shell de lui-même, avec vos droits ; s'il ne l'a pas fait au bout de 8 secondes, l'application démarre explorer.exe. La barre des tâches et le bureau disparaissent quelques secondes et les fenêtres de l'Explorateur se ferment ; les autres applications continuent de fonctionner.
+- La barre d'état affiche la progression et le résultat ; la liste s'actualise ensuite. Le redémarrage est inscrit dans le journal.
 
 ## 1.8.0 (2026-10-19)
 

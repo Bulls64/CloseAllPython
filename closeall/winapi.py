@@ -113,6 +113,7 @@ class SystemProcess:
     created: int         # same FILETIME value as creation_time()
     private_memory: int  # private working set in bytes (the Task Manager's "Memory" column)
     working_set: int
+    session: int = 0     # Windows session (each signed-in user has their own)
 
 
 class BITMAPINFOHEADER(ctypes.Structure):
@@ -158,6 +159,7 @@ _proto(kernel32.Process32NextW, wintypes.BOOL, wintypes.HANDLE, ctypes.POINTER(P
 _proto(ntdll.NtQuerySystemInformation, ctypes.c_ulong, wintypes.ULONG, ctypes.c_void_p, wintypes.ULONG,
        ctypes.POINTER(wintypes.ULONG))
 _proto(kernel32.GetConsoleWindow, wintypes.HWND)
+_proto(kernel32.ProcessIdToSessionId, wintypes.BOOL, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD))
 _proto(user32.InternalGetWindowText, ctypes.c_int, wintypes.HWND, wintypes.LPWSTR, ctypes.c_int)
 _proto(user32.SendMessageTimeoutW, wintypes.LPARAM, wintypes.HWND, wintypes.UINT, wintypes.WPARAM,
        wintypes.LPARAM, wintypes.UINT, wintypes.UINT, ctypes.POINTER(ctypes.c_size_t))
@@ -318,10 +320,25 @@ def system_processes():
         image = info.ImageName
         name = ctypes.wstring_at(image.Buffer, image.Length // 2) if image.Buffer and image.Length else ""
         processes.append(SystemProcess(info.UniqueProcessId or 0, info.InheritedFromUniqueProcessId or 0, name,
-                                       info.CreateTime, max(0, info.WorkingSetPrivateSize), info.WorkingSetSize))
+                                       info.CreateTime, max(0, info.WorkingSetPrivateSize), info.WorkingSetSize,
+                                       info.SessionId))
         if not info.NextEntryOffset:
             return processes
         offset += info.NextEntryOffset
+
+
+def current_session():
+    """Windows session of this process."""
+    session = wintypes.DWORD(0)
+    if not kernel32.ProcessIdToSessionId(os.getpid(), ctypes.byref(session)):
+        raise _last_error()
+    return session.value
+
+
+def start_explorer():
+    """Start the Windows shell (desktop, taskbar, Start menu)."""
+    windows = os.environ.get("SystemRoot") or r"C:\Windows"
+    subprocess.Popen([os.path.join(windows, "explorer.exe")], close_fds=True)  # noqa: S603 - fixed system path
 
 
 def console_window():

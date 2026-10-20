@@ -5,7 +5,8 @@ import sys
 import types
 from collections import namedtuple
 
-SystemProcess = namedtuple("SystemProcess", "pid ppid name created private_memory working_set")
+SystemProcess = namedtuple("SystemProcess", "pid ppid name created private_memory working_set session",
+                           defaults=(1,))
 
 
 class FakeWinError(OSError):
@@ -25,13 +26,20 @@ class FakeSystem:
         self.console = 0
         self.calls = []   # ("terminate" | "wait", pid), in call order
 
-    def add_process(self, pid, path, created=1000, ppid=0, exits_on_close=True, deny=False, memory=0, name=None):
+    def add_process(self, pid, path, created=1000, ppid=0, exits_on_close=True, deny=False, memory=0, name=None,
+                    session=1):
         self.processes[pid] = {"path": path, "created": created, "ppid": ppid, "alive": True,
                                "exits_on_close": exits_on_close, "deny": deny, "memory": memory,
-                               "name": name if name is not None else ntpath.basename(path or "")}
+                               "name": name if name is not None else ntpath.basename(path or ""),
+                               "session": session}
 
     def add_window(self, hwnd, pid, title, task=True, cls="", visible=True):
         self.windows.append({"hwnd": hwnd, "pid": pid, "title": title, "task": task, "cls": cls, "visible": visible})
+
+    def start_explorer(self):
+        self.calls.append(("start_explorer", None))
+        pid = 9000 + len(self.calls)
+        self.add_process(pid, r"C:\Windows\explorer.exe", created=pid)
 
     def _window(self, hwnd):
         return next((w for w in self.windows if w["hwnd"] == hwnd), None)
@@ -90,8 +98,11 @@ class FakeSystem:
         mod.terminate = terminate
         mod.process_info = process_info
         mod.process_table = lambda: {pid: (p["ppid"], os.path.basename(p["path"] or "")) for pid, p in system.processes.items()}
-        mod.system_processes = lambda: [SystemProcess(pid, p["ppid"], p["name"], p["created"], p["memory"], p["memory"])
+        mod.system_processes = lambda: [SystemProcess(pid, p["ppid"], p["name"], p["created"], p["memory"], p["memory"],
+                                                      p["session"])
                                         for pid, p in system.processes.items() if p["alive"]]
+        mod.current_session = lambda: 1
+        mod.start_explorer = system.start_explorer
         mod.console_window = lambda: system.console
         mod.top_level_windows = top_level_windows
         mod.is_task_window = lambda hwnd: system._window(hwnd)["task"]

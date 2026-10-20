@@ -352,6 +352,60 @@ def close_explorer_windows():
     return closed
 
 
+EXPLORER_RESTART_WAIT = 8.0   # seconds left to Windows to restart the shell by itself
+
+
+def explorer_processes():
+    """The explorer.exe processes of this Windows session (shell and separate folder windows)."""
+    session = winapi.current_session()
+    return [p for p in winapi.system_processes() if p.name.lower() == "explorer.exe" and p.session == session]
+
+
+def restart_explorer(wait=EXPLORER_RESTART_WAIT, sleep=time.sleep, clock=time.monotonic):
+    """Stop File Explorer (desktop, taskbar and folder windows) and bring it back.
+
+    Every explorer.exe of this session is force-stopped with a non-zero exit code: Windows
+    then restarts the shell by itself, as the user's own process. When it has not done so
+    after `wait` seconds, explorer.exe is started from here. Returns "restarted" (by Windows)
+    or "started" (by this program); raises ProcessError when no Explorer process could be stopped.
+    """
+    old = explorer_processes()
+    stopped, error = 0, None
+    for p in old:
+        target = Target(p.pid, p.created, "explorer.exe")
+        try:
+            handle = _open_verified(target, winapi.PROCESS_TERMINATE)
+        except ProcessError as exc:
+            if exc.key == "process_gone":
+                stopped += 1
+            else:
+                error = exc
+            continue
+        try:
+            winapi.terminate(handle, 1)
+            winapi.wait(handle, FORCE_WAIT_MS)
+            stopped += 1
+        except OSError as exc:
+            error = _classify(exc)
+        finally:
+            winapi.close_handle(handle)
+    log.info("explorer_stopped count=%s of=%s", stopped, len(old))
+    if old and not stopped:
+        raise error or ProcessError("os_error", "explorer.exe")
+    old_keys = {(p.pid, p.created) for p in old}
+    deadline = clock() + wait
+    while True:
+        if any((p.pid, p.created) not in old_keys for p in explorer_processes()):
+            log.info("explorer_restarted by=windows")
+            return "restarted"
+        if clock() >= deadline:
+            break
+        sleep(0.25)
+    winapi.start_explorer()
+    log.info("explorer_restarted by=closeallpython")
+    return "started"
+
+
 def windows_of(target):
     """Current top-level windows of a target (fresh list: HWNDs change over time)."""
     return [w.hwnd for w in list_windows() if w.key == target.key]

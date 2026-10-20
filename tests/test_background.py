@@ -107,6 +107,7 @@ class WindowsProcessListTests(unittest.TestCase):
         # same creation time as GetProcessTimes: the structure layout is right
         self.assertEqual(me.created, winapi.process_info(os.getpid())[1])
         self.assertIn(4, processes)
+        self.assertEqual(me.session, winapi.current_session())
 
 
 if __name__ == "__main__":
