@@ -82,6 +82,14 @@ def find(name, folder=None, factory=None):
     return path if path and path.is_file() else None
 
 
+def find_any(names, folder=None, factory=None):
+    """The first of these shortcuts that exists, else None (one desktop lookup for all)."""
+    folder = Path(folder) if folder else desktop_folder(factory)
+    if folder is None:
+        return None
+    return next((path for path in (folder / _file_name(name) for name in names) if path.is_file()), None)
+
+
 def create(name, description="", folder=None, factory=None):
     """Create (or replace) the shortcut on the desktop; returns its path."""
     try:

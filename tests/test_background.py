@@ -67,6 +67,37 @@ class BackgroundTests(unittest.TestCase):
             self.system.add_process(pid, rf"C:\Bg\app{pid}.exe", memory=pid)
         self.assertEqual(len(core.background_processes(self.windows).top), core.BACKGROUND_LIMIT)
 
+    def test_same_executable_without_a_parent_window_is_listed(self):
+        # A Python service must not vanish because a Python program has a window.
+        self.system.add_process(700, r"C:\Python\python.exe", created=7, memory=30 * MB)
+        self.system.add_process(701, r"C:\Python\python.exe", created=8, ppid=20, memory=900 * MB)
+        self.system.add_window(7, 700, "IDLE Shell")
+        report = core.background_processes(core.list_windows())
+        self.assertEqual((report.top[0].pid, report.top[0].memory), (701, 900 * MB))
+        self.assertNotIn(700, [p.pid for p in report.top])
+
+    def test_helpers_of_helpers_stay_with_the_application(self):
+        self.system.add_process(102, r"C:\Program Files\Google\Chrome\chrome.exe", created=9, ppid=101,
+                                memory=500 * MB)
+        self.assertNotIn("chrome.exe", self.names(core.background_processes(self.windows)))
+
+    def test_children_of_explorer_are_listed_when_explorer_has_a_window(self):
+        self.system.add_window(3, 10, "Documents")   # a folder window: explorer.exe is windowed
+        self.system.add_process(201, r"C:\Apps\tray.exe", created=11, ppid=10, memory=80 * MB)
+        windows = core.list_windows()
+        self.assertIn("tray.exe", self.names(core.background_processes(windows)))
+
+    def test_reused_parent_pid_does_not_hide_a_process(self):
+        # The parent PID now belongs to a newer, windowed process: not the real parent.
+        self.system.add_process(900, r"C:\Apps\editor.exe", created=50)
+        self.system.add_window(9, 900, "Editor")
+        self.system.add_process(901, r"C:\Apps\sync.exe", created=40, ppid=900, memory=70 * MB)
+        self.assertIn("sync.exe", self.names(core.background_processes(core.list_windows())))
+
+    def test_closeallpython_itself_is_never_listed(self):
+        self.system.add_process(950, r"C:\Tools\CloseAllPython.exe", created=60, memory=900 * MB)
+        self.assertNotIn("CloseAllPython.exe", self.names(core.background_processes(self.windows)))
+
     def test_reused_pid_hides_the_path(self):
         system = fakewin.FakeSystem()
         system.add_process(700, r"C:\Apps\other.exe", created=99, memory=10 * MB)
@@ -108,6 +139,15 @@ class WindowsProcessListTests(unittest.TestCase):
         self.assertEqual(me.created, winapi.process_info(os.getpid())[1])
         self.assertIn(4, processes)
         self.assertEqual(me.session, winapi.current_session())
+
+
+class SummaryTests(unittest.TestCase):
+    def test_singular_and_plural(self):
+        self.assertEqual(i18n.translate_n("fr", "background_top", 1), "Celui qui utilise le plus de mémoire")
+        self.assertEqual(i18n.translate_n("fr", "background_top", 10), "Les 10 qui utilisent le plus de mémoire")
+        self.assertEqual(i18n.translate_n("en", "background_top", 1), "The one using the most memory")
+        self.assertEqual(i18n.translate_n("en", "background_count", 1, total="3 MB"),
+                         "1 process without a window, 3 MB in all")
 
 
 if __name__ == "__main__":

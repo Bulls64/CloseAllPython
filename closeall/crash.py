@@ -11,6 +11,7 @@ from .i18n import translate
 log = logging.getLogger(settings_mod.LOGGER_NAME)
 
 MB_ICONERROR = 0x10
+MB_ICONWARNING = 0x30
 
 
 def crash_path():
@@ -29,11 +30,11 @@ def write_report(details):
     return path
 
 
-def message_box(text, title="CloseAllPython"):
+def message_box(text, title="CloseAllPython", icon=MB_ICONERROR):
     """Native Windows message box (works before and without Tk), else stderr."""
     if sys.platform == "win32":
         try:
-            ctypes.windll.user32.MessageBoxW(None, text, title, MB_ICONERROR)
+            ctypes.windll.user32.MessageBoxW(None, text, title, icon)
             return
         except (AttributeError, OSError):
             pass

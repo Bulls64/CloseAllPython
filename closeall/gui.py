@@ -16,7 +16,7 @@ import customtkinter as ctk
 from . import __version__, appicon, core, crash, settings as settings_mod, shortcut, updater, winapi
 from .gui_theme import (ACCENT, ACCENT_HOVER, C, WARN_FILL, WARN_FILL_HOVER, WARN_ON, WHITE, Fonts,
                         tile_color, tile_letter)
-from .i18n import LANGUAGE_NAMES, format_memory, format_seconds, translate, translate_n
+from .i18n import LANGUAGE_NAMES, TEXT, format_memory, format_seconds, translate, translate_n
 
 log = logging.getLogger(settings_mod.LOGGER_NAME)
 
@@ -1032,8 +1032,9 @@ class BackgroundPage(ctk.CTkFrame):
         if not report.top:
             self.summary.configure(text=t("background_empty"))
             return
-        self.summary.configure(text=app.tn("background_summary", report.count, shown=len(report.top),
-                                           total=format_memory(app.language, report.total)))
+        total = format_memory(app.language, report.total)
+        self.summary.configure(text=f"{app.tn('background_top', len(report.top))} · "
+                                    f"{app.tn('background_count', report.count, total=total)}")
         largest = max(report.top[0].memory, 1)
         app.preload_icons(p.exe_path for p in report.top)
         for rank, process in enumerate(report.top, 1):
@@ -1152,7 +1153,9 @@ class SettingsPage(ctk.CTkFrame):
         self.pin_button.pack(side="left", padx=(8, 0))
         self.shortcut_status = label(link, "", app.fonts.small, "muted", wraplength=640)
         self.shortcut_status.pack(fill="x", pady=(8, 0))
-        self.shortcut_file = shortcut.find(t("shortcut_name"))
+        # Named in the language of its creation: look for every language's name, current first.
+        self.shortcut_file = shortcut.find_any([t("shortcut_name")] + [
+            texts["shortcut_name"] for code, texts in TEXT.items() if code != app.language])
         self._show_shortcut_status()
 
     def _show_shortcut_status(self):
@@ -1163,7 +1166,10 @@ class SettingsPage(ctk.CTkFrame):
     def _create_shortcut(self):
         t = self.app.t
         try:
-            self.shortcut_file = shortcut.create(t("shortcut_name"), t("shortcut_description"))
+            # An existing shortcut is updated under its own name rather than duplicated.
+            existing = self.shortcut_file if self.shortcut_file and self.shortcut_file.is_file() else None
+            self.shortcut_file = shortcut.create(existing.stem if existing else t("shortcut_name"),
+                                                 t("shortcut_description"), folder=existing.parent if existing else None)
         except shortcut.ShortcutError as exc:
             Dialog(self.app, t("error"), t("shortcut_failed", error=exc.detail))
             return

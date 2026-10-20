@@ -1,6 +1,6 @@
-# Tests on every push and pull request. A pushed version tag (v1.5.1...) also builds the two
-# executables on Windows and attaches them to the GitHub release of that tag, with notes taken
-# from CHANGELOG.md, so the published binaries always match the tagged source code.
+# Tests and executables on every push and pull request. A pushed version tag (v1.9.1...) also
+# publishes the two executables built and checked by the `build` job on the GitHub release of
+# that tag, with notes taken from CHANGELOG.md: the published files are exactly the tested ones.
 name: Tests and release
 
 on:
@@ -29,9 +29,51 @@ jobs:
       - name: Run the tests
         run: python -m unittest discover -s tests -t . -v
 
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Install build dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements-build.txt
+      - name: Build the executables
+        shell: bash
+        run: |
+          python -m PyInstaller --noconfirm --clean --distpath dist --workpath build CloseAllPython.spec
+          python -m PyInstaller --noconfirm --clean --distpath dist --workpath build CloseAllPython-CLI.spec
+          ls -l dist
+      - name: Check that the executables start
+        # --self-test imports every bundled module and makes each kind of system call (windows,
+        # process memory, sessions, the COM object of the desktop shortcut). It never opens a
+        # window; the time limit only guards against an unexpected dialog.
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          $version = python -c "import closeall; print(closeall.__version__)"
+          $printed = (& dist/CloseAllPython-CLI.exe --version | Out-String).Trim()
+          if ($printed -ne "CloseAllPython $version") { throw "CLI --version printed '$printed'" }
+          & dist/CloseAllPython-CLI.exe --self-test
+          if ($LASTEXITCODE -ne 0) { throw "CloseAllPython-CLI.exe --self-test failed ($LASTEXITCODE)" }
+          & dist/CloseAllPython-CLI.exe --no-ui --all --dry-run
+          if ($LASTEXITCODE -ne 0) { throw "CloseAllPython-CLI.exe --no-ui --all --dry-run failed ($LASTEXITCODE)" }
+          $gui = Start-Process -FilePath dist/CloseAllPython.exe -ArgumentList "--self-test" -Wait -PassThru
+          if ($gui.ExitCode -ne 0) { throw "CloseAllPython.exe --self-test failed ($($gui.ExitCode))" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: executables
+          path: |
+            dist/CloseAllPython.exe
+            dist/CloseAllPython-CLI.exe
+          if-no-files-found: error
+          retention-days: 14
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: test
+    needs: [test, build]
     runs-on: windows-latest
     permissions:
       contents: write   # create or update the release and its files
@@ -43,8 +85,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
-          cache: pip
-          cache-dependency-path: requirements*.txt
       - name: Check that the tag matches the program version
         shell: bash
         run: |
@@ -53,19 +93,16 @@ jobs:
             echo "::error::Tag $TAG does not match closeall.__version__ ($version)"
             exit 1
           fi
-      - name: Install build dependencies
-        run: python -m pip install --disable-pip-version-check -r requirements-build.txt
-      - name: Build the executables
-        shell: bash
-        run: |
-          python -m PyInstaller --noconfirm --clean --distpath dist --workpath build CloseAllPython.spec
-          python -m PyInstaller --noconfirm --clean --distpath dist --workpath build CloseAllPython-CLI.spec
-          ls -l dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: executables
+          path: dist
       - name: Write the release notes
         run: python .github/scripts/release_notes.py "$env:TAG" release-notes.md
       - name: Publish the release
         shell: bash
         run: |
+          ls -l dist
           title="CloseAllPython $TAG"
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release edit "$TAG" --title "$title" --notes-file release-notes.md

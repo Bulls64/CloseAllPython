@@ -29,6 +29,11 @@ def _exe_name(path):
     return ntpath.basename(path).lower() if path else ""
 
 
+def is_closeallpython(exe_path):
+    """An executable of this program (CloseAllPython.exe, CloseAllPython-CLI.exe...)."""
+    return _exe_name(exe_path).startswith("closeallpython")
+
+
 def _is_protected(pid, exe_path):
     return pid in SYSTEM_PIDS or _exe_name(exe_path) in PROTECTED_EXECUTABLES
 
@@ -207,19 +212,34 @@ class BackgroundReport:
 def background_processes(windows, include_system=False, limit=BACKGROUND_LIMIT):
     """The processes running without any window, those using the most memory first.
 
-    A process is in the background when no window of `windows` belongs to it or to another
-    process of the same executable (a browser's helper processes stay with the browser).
-    Memory is the private working set, the Task Manager's "Memory" column. Processes that are
-    part of Windows are left out unless `include_system`.
+    A process is in the background when it has no window in `windows` and was not started by
+    an application that has one: a browser's or Steam's helper processes stay with it. Windows
+    processes never count as such an application (Explorer starts nearly everything). Memory
+    is the private working set, the Task Manager's "Memory" column. Processes that are part of
+    Windows are left out unless `include_system`; this program's own processes always are.
     """
     processes = winapi.system_processes()
+    by_pid = {p.pid: p for p in processes}
     windowed_pids = {w.pid for w in windows} | {w.hwnd_pid for w in windows}
-    windowed_names = {_exe_name(w.exe_path) for w in windows if w.exe_path}
-    windowed_names |= {p.name.lower() for p in processes if p.pid in windowed_pids}
+    owners = {pid for pid in windowed_pids if pid in by_pid and not _is_protected(pid, by_pid[pid].name)}
+
+    def started_by_an_owner(process):
+        child = process
+        for _ in range(32):
+            parent = by_pid.get(child.ppid)
+            # A parent created after its child is another process that reused the PID.
+            if parent is None or parent.pid == child.pid or (parent.created and child.created
+                                                              and parent.created > child.created):
+                return False
+            if parent.pid in owners:
+                return True
+            child = parent
+        return False
+
     found = []
     for p in processes:
         name = p.name.lower()
-        if p.pid == 0 or p.pid in windowed_pids or name in windowed_names:
+        if p.pid == 0 or p.pid in windowed_pids or is_closeallpython(name) or started_by_an_owner(p):
             continue
         protected = p.pid in SYSTEM_PIDS or name in PROTECTED_EXECUTABLES or name in SYSTEM_IMAGE_NAMES
         if protected and not include_system:

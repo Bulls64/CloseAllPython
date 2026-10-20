@@ -114,6 +114,13 @@ class CreateTests(unittest.TestCase):
         self.assertEqual(shortcut.find("Tout fermer", factory=lambda: shell), self.desktop / "Tout fermer.lnk")
         self.assertEqual(shortcut.find("Tout fermer", folder=self.desktop), self.desktop / "Tout fermer.lnk")
 
+    def test_find_any_language(self):
+        shell = FakeShell(self.desktop)
+        (self.desktop / "Close everything.lnk").write_bytes(b"lnk")
+        found = shortcut.find_any(["Tout fermer", "Close everything"], factory=lambda: shell)
+        self.assertEqual(found, self.desktop / "Close everything.lnk")
+        self.assertIsNone(shortcut.find_any(["Tout fermer"], factory=lambda: shell))
+
     def test_find_without_desktop(self):
         def broken():
             raise OSError("no shell")

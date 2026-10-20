@@ -1,11 +1,13 @@
 """Command-line parsing and the --no-ui mode."""
 import argparse
+import io
 import sys
 
 from . import __version__, settings as settings_mod
 from .i18n import translate
 
 CONFIRM_ANSWERS = frozenset({"y", "yes", "o", "oui"})
+MAX_BOX_LINES = 12
 
 
 def build_parser(language):
@@ -25,6 +27,8 @@ def build_parser(language):
     parser.add_argument("--dry-run", action="store_true", help=t("cli_help_dry_run"))
     parser.add_argument("--timeout", type=int, metavar="SECONDS", help=t("cli_help_timeout"))
     parser.add_argument("--update", action="store_true", help=t("cli_help_update"))
+    # Used by the release workflow to check a freshly built executable before publishing it.
+    parser.add_argument("--self-test", action="store_true", help=argparse.SUPPRESS)
     return parser
 
 
@@ -33,6 +37,10 @@ def parse_args(argv, language):
     args = parser.parse_args(argv)
     cli_only = (args.close is not None or args.all or args.close_explorer or args.yes or args.force or args.graceful or args.dry_run
                 or args.timeout is not None)
+    if args.self_test:
+        if cli_only or args.no_ui or args.update:
+            parser.error("--self-test is used on its own")
+        return args
     if args.update:
         if cli_only or args.no_ui:
             parser.error(translate(language, "cli_update_alone"))
@@ -58,9 +66,11 @@ def _emit(stream, text, end="\n"):
         stream.flush()
 
 
-def run_cli(args, prefs, out=None, err=None, stdin=None):
+def run_cli(args, prefs, out=None, err=None, stdin=None, problems=None):
     """Execute --no-ui. Exit codes: 0 success, 1 something left running or failed / aborted,
-    2 confirmation impossible."""
+    2 confirmation impossible. `problems`, when given, receives the lines that explain a
+    non-zero exit code (shown in a message box when there is no console)."""
+    problems = [] if problems is None else problems
     from . import core
 
     out = sys.stdout if out is None else out
@@ -80,7 +90,11 @@ def run_cli(args, prefs, out=None, err=None, stdin=None):
         return 0
 
     windows = core.list_windows(core.own_pids(include_ancestors=True))
-    if not args.all:
+    if args.all:
+        # "Everything" never includes this program: the desktop shortcut must not close the
+        # CloseAllPython window the user has open.
+        windows = [w for w in windows if not core.is_closeallpython(w.exe_path)]
+    else:
         windows = core.filter_by_title(windows, args.close)
     targets = core.group_targets(windows)
     protected = [x for x in targets if x.protected]
@@ -97,6 +111,7 @@ def run_cli(args, prefs, out=None, err=None, stdin=None):
     if not args.yes:
         if stdin is None or not stdin.isatty():
             _emit(err, t("cli_no_tty"))
+            problems.append(t("cli_no_tty"))
             return 2
         _emit(out, t("cli_confirm", count=len(targets)), end="")
         if stdin.readline().strip().casefold() not in CONFIRM_ANSWERS:
@@ -115,15 +130,36 @@ def run_cli(args, prefs, out=None, err=None, stdin=None):
         elif r.status == core.FORCED:
             _emit(out, t("cli_forced", pid=r.target.pid, name=name))
         elif r.status == core.STILL_RUNNING:
-            _emit(err, t("cli_still_running", pid=r.target.pid, name=name))
+            problems.append(t("cli_still_running", pid=r.target.pid, name=name))
+            _emit(err, problems[-1])
         elif r.status == core.FAILED:
-            _emit(err, t("cli_failed", pid=r.target.pid, name=name,
-                         error=t(r.error_key, detail=r.detail)))
+            problems.append(t("cli_failed", pid=r.target.pid, name=name, error=t(r.error_key, detail=r.detail)))
+            _emit(err, problems[-1])
     counts = core.summarize(results)
-    _emit(out, "\n" + t("cli_summary", closed=counts[core.CLOSED], forced=counts[core.FORCED],
-                        still=counts[core.STILL_RUNNING], failed=counts[core.FAILED],
-                        skipped=len(protected) + counts[core.PROTECTED]))
-    return 1 if counts[core.FAILED] or counts[core.STILL_RUNNING] else 0
+    summary = t("cli_summary", closed=counts[core.CLOSED], forced=counts[core.FORCED],
+                still=counts[core.STILL_RUNNING], failed=counts[core.FAILED],
+                skipped=len(protected) + counts[core.PROTECTED])
+    _emit(out, "\n" + summary)
+    if counts[core.FAILED] or counts[core.STILL_RUNNING]:
+        problems.append(summary)
+        return 1
+    return 0
+
+
+def run_windowless(args, prefs, show=None):
+    """--no-ui without a console (windowed executable, pythonw: the desktop shortcut). Nothing
+    can be printed, so a failure is shown in a message box instead of passing unnoticed."""
+    problems = []
+    code = run_cli(args, prefs, out=io.StringIO(), err=io.StringIO(), problems=problems)
+    if code and problems:
+        if show is None:
+            from .crash import MB_ICONWARNING, message_box
+
+            def show(text):
+                message_box(text, icon=MB_ICONWARNING)
+        lines = problems if len(problems) <= MAX_BOX_LINES else problems[:MAX_BOX_LINES - 2] + ["…", problems[-1]]
+        show(translate(prefs["language"], "cli_windowless_failed", details="\n".join(lines)))
+    return code
 
 
 def run_update(prefs, out=None, err=None, updater=None, exe_path=None):
@@ -157,13 +193,69 @@ def run_update(prefs, out=None, err=None, updater=None, exe_path=None):
     return 0
 
 
+def self_test_checks():
+    """What a built executable must manage: every module bundled, and each kind of system call
+    (window list, process memory, sessions, the COM object behind the desktop shortcut)."""
+    import importlib
+    import os
+
+    def gui():
+        importlib.import_module("closeall.gui")
+
+    def windows():
+        from . import core
+        core.list_windows()
+
+    def processes():
+        from . import winapi
+        pids = {p.pid for p in winapi.system_processes()}
+        if os.getpid() not in pids:
+            raise RuntimeError("this process is missing from the process list")
+
+    def session():
+        from . import winapi
+        winapi.current_session()
+
+    def shortcut_com():
+        from . import shortcut
+        if not shortcut._wscript_shell().SpecialFolders("Desktop"):
+            raise RuntimeError("no desktop folder")
+
+    return [("interface", gui), ("windows", windows), ("processes", processes), ("session", session),
+            ("shortcut", shortcut_com)]
+
+
+def run_self_test(out=None, err=None, checks=None):
+    """--self-test: 0 when every check passes, 1 otherwise. Never shows a window or a message box,
+    so a build server can run the windowed executable too."""
+    import traceback
+
+    out = sys.stdout if out is None else out
+    err = sys.stderr if err is None else err
+    failed = 0
+    for name, check in checks if checks is not None else self_test_checks():
+        try:
+            check()
+        except Exception:
+            failed += 1
+            _emit(err, f"FAIL {name}\n{traceback.format_exc()}")
+        else:
+            _emit(out, f"ok   {name}")
+    _emit(out, f"CloseAllPython {__version__} self-test: {'FAILED' if failed else 'passed'}")
+    return 1 if failed else 0
+
+
 def run(argv=None):
     settings_mod.setup_logging()
     prefs = settings_mod.load_settings()
     args = parse_args(sys.argv[1:] if argv is None else argv, prefs["language"])
+    if args.self_test:
+        return run_self_test()
     if args.update:
         return run_update(prefs)
     if args.no_ui:
+        if sys.stdout is None:
+            return run_windowless(args, prefs)
         return run_cli(args, prefs)
     try:
         from . import gui

@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.9.1 (2026-10-20)
+
+Fixes from the review of 1.9.0
+- "Close everything" shortcut: when some windows cannot be closed (applications started as administrator, for example), a message now says which ones. The shortcut runs without any window, so a failure used to go unnoticed; the details are still in the log.
+- "Close everything" shortcut and `--no-ui --all`: CloseAllPython itself is no longer closed, so the shortcut does not close the window of the application you have open. `--close` can still target it by its title.
+- Settings › Shortcut: the shortcut is found whatever the language it was created in ("Close everything" or "Tout fermer"); *Create the shortcut* updates it instead of adding a second one, and *Pin to the taskbar…* is available after a change of language.
+- Background screen: a windowless process is no longer hidden because another process of the same executable has a window (a Python service while a Python program is open, for example). Helper processes are now recognised by the application that started them; Windows processes such as Explorer are never treated as that application.
+- Background screen: correct wording with a single process ("The one using the most memory").
+- GitHub Actions: the executables are built and started on every push (`--self-test`: every module, the window list, process memory, sessions and the COM object of the shortcut, plus `--version` and `--no-ui --all --dry-run`), and a release publishes exactly those tested files.
+
 ## 1.9.0 (2026-10-20)
 
 Restart File Explorer
@@ -112,6 +122,16 @@ Project
 ---
 
 # Journal des modifications (version française)
+
+## 1.9.1 (2026-10-20)
+
+Corrections issues de l'analyse de la 1.9.0
+- Raccourci « Tout fermer » : quand des fenêtres n'ont pas pu être fermées (applications lancées en administrateur, par exemple), un message indique maintenant lesquelles. Le raccourci s'exécute sans fenêtre, donc un échec passait inaperçu ; les détails restent dans le journal.
+- Raccourci « Tout fermer » et `--no-ui --all` : CloseAllPython lui-même n'est plus fermé, le raccourci ne ferme donc plus la fenêtre de l'application ouverte. `--close` peut toujours la viser par son titre.
+- Paramètres › Raccourci : le raccourci est retrouvé quelle que soit la langue dans laquelle il a été créé (« Tout fermer » ou « Close everything ») ; *Créer le raccourci* le met à jour au lieu d'en ajouter un second, et *Épingler à la barre des tâches…* reste disponible après un changement de langue.
+- Écran Arrière-plan : un processus sans fenêtre n'est plus masqué parce qu'un autre processus du même exécutable a une fenêtre (un service Python pendant qu'un programme Python est ouvert, par exemple). Les processus annexes sont maintenant rattachés à l'application qui les a lancés ; les processus de Windows comme l'Explorateur ne comptent jamais comme cette application.
+- Écran Arrière-plan : formulation correcte avec un seul processus (« Celui qui utilise le plus de mémoire »).
+- GitHub Actions : les exécutables sont compilés et lancés à chaque push (`--self-test` : chaque module, la liste des fenêtres, la mémoire des processus, les sessions et l'objet COM du raccourci, plus `--version` et `--no-ui --all --dry-run`), et une release publie exactement ces fichiers testés.
 
 ## 1.9.0 (2026-10-20)
 
