@@ -75,13 +75,6 @@ def desktop_folder(factory=None):
     return Path(folder) if folder else None
 
 
-def find(name, folder=None, factory=None):
-    """The shortcut called `name` when it already exists, else None."""
-    folder = Path(folder) if folder else desktop_folder(factory)
-    path = folder / _file_name(name) if folder else None
-    return path if path and path.is_file() else None
-
-
 def find_any(names, folder=None, factory=None):
     """The first of these shortcuts that exists, else None (one desktop lookup for all)."""
     folder = Path(folder) if folder else desktop_folder(factory)

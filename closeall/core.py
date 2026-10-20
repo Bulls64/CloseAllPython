@@ -38,8 +38,24 @@ def _is_protected(pid, exe_path):
     return pid in SYSTEM_PIDS or _exe_name(exe_path) in PROTECTED_EXECUTABLES
 
 
+class _Process:
+    """What windows and targets share: the process they designate (pid + creation time)."""
+
+    @property
+    def key(self):
+        return self.pid, self.created
+
+    @property
+    def app_name(self):
+        return ntpath.splitext(ntpath.basename(self.exe_path))[0] if self.exe_path else ""
+
+    @property
+    def protected(self):
+        return _is_protected(self.pid, self.exe_path)
+
+
 @dataclass(frozen=True)
-class WindowInfo:
+class WindowInfo(_Process):
     hwnd: int
     hwnd_pid: int      # process owning the HWND (ApplicationFrameHost for UWP apps)
     pid: int           # process to close
@@ -47,38 +63,14 @@ class WindowInfo:
     title: str
     exe_path: str | None
 
-    @property
-    def key(self):
-        return self.pid, self.created
-
-    @property
-    def app_name(self):
-        return ntpath.splitext(ntpath.basename(self.exe_path))[0] if self.exe_path else ""
-
-    @property
-    def protected(self):
-        return _is_protected(self.pid, self.exe_path)
-
 
 @dataclass
-class Target:
+class Target(_Process):
     pid: int
     created: int
     exe_path: str | None
     titles: list = field(default_factory=list)
     hwnds: list = field(default_factory=list)
-
-    @property
-    def key(self):
-        return self.pid, self.created
-
-    @property
-    def app_name(self):
-        return ntpath.splitext(ntpath.basename(self.exe_path))[0] if self.exe_path else ""
-
-    @property
-    def protected(self):
-        return _is_protected(self.pid, self.exe_path)
 
 
 @dataclass
@@ -301,11 +293,6 @@ def _log(result):
     return result
 
 
-def force_stop(target):
-    """Force-stop one target (waits up to FORCE_WAIT_MS for it to disappear)."""
-    return force_processes([target])[0]
-
-
 def force_processes(targets, on_result=None):
     """Force-stop every target immediately; `on_result` gets each Result as soon as it is known.
 
@@ -375,9 +362,9 @@ def close_explorer_windows():
 EXPLORER_RESTART_WAIT = 8.0   # seconds left to Windows to restart the shell by itself
 
 
-def explorer_processes():
-    """The explorer.exe processes of this Windows session (shell and separate folder windows)."""
-    session = winapi.current_session()
+def explorer_processes(session=None):
+    """The explorer.exe processes of a Windows session (default: this one), shell and folder windows."""
+    session = winapi.current_session() if session is None else session
     return [p for p in winapi.system_processes() if p.name.lower() == "explorer.exe" and p.session == session]
 
 
@@ -389,7 +376,8 @@ def restart_explorer(wait=EXPLORER_RESTART_WAIT, sleep=time.sleep, clock=time.mo
     after `wait` seconds, explorer.exe is started from here. Returns "restarted" (by Windows)
     or "started" (by this program); raises ProcessError when no Explorer process could be stopped.
     """
-    old = explorer_processes()
+    session = winapi.current_session()
+    old = explorer_processes(session)
     stopped, error = 0, None
     for p in old:
         target = Target(p.pid, p.created, "explorer.exe")
@@ -415,7 +403,7 @@ def restart_explorer(wait=EXPLORER_RESTART_WAIT, sleep=time.sleep, clock=time.mo
     old_keys = {(p.pid, p.created) for p in old}
     deadline = clock() + wait
     while True:
-        if any((p.pid, p.created) not in old_keys for p in explorer_processes()):
+        if any((p.pid, p.created) not in old_keys for p in explorer_processes(session)):
             log.info("explorer_restarted by=windows")
             return "restarted"
         if clock() >= deadline:

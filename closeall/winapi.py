@@ -37,11 +37,8 @@ INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
 
 # Window messages and styles
 WM_CLOSE = 0x0010
-WM_GETICON = 0x007F
 WM_SETICON = 0x0080
-ICON_SMALL, ICON_BIG, ICON_SMALL2 = 0, 1, 2
-GCL_HICON, GCL_HICONSM = -14, -34
-SMTO_BLOCK, SMTO_ABORTIFHUNG = 0x1, 0x2
+ICON_SMALL, ICON_BIG = 0, 1
 GWL_EXSTYLE = -20
 WS_EX_TOOLWINDOW, WS_EX_APPWINDOW = 0x00000080, 0x00040000
 GW_OWNER = 4
@@ -161,10 +158,6 @@ _proto(ntdll.NtQuerySystemInformation, ctypes.c_ulong, wintypes.ULONG, ctypes.c_
 _proto(kernel32.GetConsoleWindow, wintypes.HWND)
 _proto(kernel32.ProcessIdToSessionId, wintypes.BOOL, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD))
 _proto(user32.InternalGetWindowText, ctypes.c_int, wintypes.HWND, wintypes.LPWSTR, ctypes.c_int)
-_proto(user32.SendMessageTimeoutW, wintypes.LPARAM, wintypes.HWND, wintypes.UINT, wintypes.WPARAM,
-       wintypes.LPARAM, wintypes.UINT, wintypes.UINT, ctypes.POINTER(ctypes.c_size_t))
-_get_class_long = getattr(user32, "GetClassLongPtrW", None) or user32.GetClassLongW
-_proto(_get_class_long, ctypes.c_size_t, wintypes.HWND, ctypes.c_int)
 _proto(user32.GetDC, wintypes.HDC, wintypes.HWND)
 _proto(user32.ReleaseDC, ctypes.c_int, wintypes.HWND, wintypes.HDC)
 _proto(user32.DrawIconEx, wintypes.BOOL, wintypes.HDC, ctypes.c_int, ctypes.c_int, wintypes.HICON,
@@ -366,17 +359,6 @@ def relaunch_as_admin():
     return (result or 0) > 32
 
 
-def set_dpi_awareness():
-    """Render crisply on high-DPI screens instead of being bitmap-stretched by Windows."""
-    try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(1)  # system DPI aware
-    except (AttributeError, OSError):
-        try:
-            user32.SetProcessDPIAware()
-        except (AttributeError, OSError):
-            pass
-
-
 # --------------------------------------------------------------------------- windows
 
 def top_level_windows():
@@ -417,13 +399,6 @@ def window_pid(hwnd):
         return win32process.GetWindowThreadProcessId(hwnd)[1]
     except win32gui.error:
         return 0
-
-
-def is_window(hwnd):
-    try:
-        return bool(win32gui.IsWindow(hwnd))
-    except win32gui.error:
-        return False
 
 
 def is_cloaked(hwnd):
@@ -496,26 +471,24 @@ def post_close(hwnd):
         return False
 
 
-def send_message_timeout(hwnd, message, wparam=0, lparam=0, timeout_ms=200):
-    """SendMessage that cannot freeze the caller when the target application is hung."""
-    result = ctypes.c_size_t(0)
-    ok = user32.SendMessageTimeoutW(hwnd, message, wparam, lparam,
-                                    SMTO_ABORTIFHUNG | SMTO_BLOCK, timeout_ms, ctypes.byref(result))
-    return result.value if ok else 0
-
-
 # --------------------------------------------------------------------------- icons
+
+def _bitmap_info(width, height):
+    """32-bit top-down DIB header."""
+    info = BITMAPINFO()
+    info.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+    info.bmiHeader.biWidth = width
+    info.bmiHeader.biHeight = -height  # top-down rows
+    info.bmiHeader.biPlanes = 1
+    info.bmiHeader.biBitCount = 32
+    return info
+
 
 def _draw_icon(hicon, size, background):
     """Draw an icon on a solid background and return the raw BGRA pixels."""
     screen = user32.GetDC(None)
     memory = gdi32.CreateCompatibleDC(screen)
-    info = BITMAPINFO()
-    info.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
-    info.bmiHeader.biWidth = size
-    info.bmiHeader.biHeight = -size  # top-down rows
-    info.bmiHeader.biPlanes = 1
-    info.bmiHeader.biBitCount = 32
+    info = _bitmap_info(size, size)
     bits = ctypes.c_void_p()
     bitmap = gdi32.CreateDIBSection(memory, ctypes.byref(info), 0, ctypes.byref(bits), None, 0)
     old = None
@@ -590,12 +563,7 @@ def icon_from_image(image):
     """HICON built from an RGBA Pillow image (the caller destroys it with destroy_icon)."""
     width, height = image.size
     pixels = image.convert("RGBA").tobytes("raw", "BGRA")
-    info = BITMAPINFO()
-    info.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
-    info.bmiHeader.biWidth = width
-    info.bmiHeader.biHeight = -height  # top-down rows
-    info.bmiHeader.biPlanes = 1
-    info.bmiHeader.biBitCount = 32
+    info = _bitmap_info(width, height)
     bits = ctypes.c_void_p()
     screen = user32.GetDC(None)
     color = gdi32.CreateDIBSection(screen, ctypes.byref(info), 0, ctypes.byref(bits), None, 0)
@@ -622,14 +590,3 @@ def set_window_icons(hwnd, big, small):
     old_big = user32.SendMessageW(hwnd, WM_SETICON, ICON_BIG, big or 0)
     old_small = user32.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, small or 0)
     return old_big, old_small
-
-
-def window_icon_image(hwnd, size):
-    """Icon published by the window itself (never blocks on a hung window), or None."""
-    icon = (send_message_timeout(hwnd, WM_GETICON, ICON_SMALL2)
-            or send_message_timeout(hwnd, WM_GETICON, ICON_SMALL)
-            or send_message_timeout(hwnd, WM_GETICON, ICON_BIG)
-            or _get_class_long(hwnd, GCL_HICONSM)
-            or _get_class_long(hwnd, GCL_HICON))
-    # These icons belong to the window: they must not be destroyed here.
-    return render_icon(icon, size) if icon else None

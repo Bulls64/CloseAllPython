@@ -2,6 +2,7 @@
 import argparse
 import io
 import sys
+from functools import partial
 
 from . import __version__, settings as settings_mod
 from .i18n import translate
@@ -11,8 +12,7 @@ MAX_BOX_LINES = 12
 
 
 def build_parser(language):
-    def t(key):
-        return translate(language, key)
+    t = partial(translate, language)
 
     parser = argparse.ArgumentParser(prog="CloseAllPython", description=t("cli_description"))
     parser.add_argument("--version", action="version", version=f"CloseAllPython {__version__}")
@@ -77,9 +77,7 @@ def run_cli(args, prefs, out=None, err=None, stdin=None, problems=None):
     err = sys.stderr if err is None else err
     stdin = sys.stdin if stdin is None else stdin
     language = prefs["language"]
-
-    def t(key, **values):
-        return translate(language, key, **values)
+    t = partial(translate, language)
 
     def label(target):
         return target.app_name or "?"
@@ -170,9 +168,7 @@ def run_update(prefs, out=None, err=None, updater=None, exe_path=None):
     out = sys.stdout if out is None else out
     err = sys.stderr if err is None else err
     language = prefs["language"]
-
-    def t(key, **values):
-        return translate(language, key, **values)
+    t = partial(translate, language)
 
     try:
         release = updater.fetch_latest()

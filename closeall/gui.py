@@ -107,6 +107,28 @@ def icon_button(master, app, glyph, command, size=40, **kwargs):
                          text_color=C["muted"], **kwargs)
 
 
+def switch(master, variable, command, text="", font=None, **kwargs):
+    return ctk.CTkSwitch(master, text=text, variable=variable, command=command, font=font, text_color=C["text"],
+                         switch_width=40, switch_height=22, progress_color=ACCENT, button_color=WHITE,
+                         button_hover_color="#f0f2f5", fg_color=("#b8c0cc", "#4a505c"), **kwargs)
+
+
+def scroll_area(master):
+    return ctk.CTkScrollableFrame(master, fg_color=C["bg"], corner_radius=0, scrollbar_button_color=C["scroll"],
+                                  scrollbar_button_hover_color=C["scroll_hover"])
+
+
+def page_header(page, app, title, pady=(22, 14)):
+    """Title at the top of a page. Returns the header (buttons go on its right) and the block
+    under the title (for a subtitle)."""
+    header = ctk.CTkFrame(page, fg_color="transparent")
+    header.grid(row=0, column=0, sticky="ew", padx=28, pady=pady)
+    titles = ctk.CTkFrame(header, fg_color="transparent")
+    titles.pack(side="left", fill="x", expand=True)
+    label(titles, title, app.fonts.title).pack(fill="x")
+    return header, titles
+
+
 def segmented(master, app, values, command, fill=False):
     return ctk.CTkSegmentedButton(master, values=values, command=command, font=app.fonts.body, height=36,
                                   corner_radius=8, border_width=3, fg_color=C["inset"], selected_color=C["seg_selected"],
@@ -224,7 +246,6 @@ class Entry:
     titles: list = field(default_factory=list)
     exe_path: str | None = None
     protected: bool = False
-    window_count: int = 1
 
 
 class AppCard(ctk.CTkFrame):
@@ -322,11 +343,7 @@ class ListPage(ctk.CTkFrame):
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(2, weight=1)
 
-        header = ctk.CTkFrame(self, fg_color="transparent")
-        header.grid(row=0, column=0, sticky="ew", padx=28, pady=(22, 14))
-        titles = ctk.CTkFrame(header, fg_color="transparent")
-        titles.pack(side="left", fill="x", expand=True)
-        label(titles, t("apps_title"), app.fonts.title).pack(fill="x")
+        header, titles = page_header(self, app, t("apps_title"))
         self.summary = label(titles, "", app.fonts.body, "muted")
         self.summary.pack(fill="x", pady=(2, 0))
         actions = ctk.CTkFrame(header, fg_color="transparent")
@@ -360,9 +377,7 @@ class ListPage(ctk.CTkFrame):
         self.filter_button = segmented(toolbar, app, ["all", "selected"], self._on_filter)
         self.filter_button.pack(side="right")
 
-        self.list = ctk.CTkScrollableFrame(self, fg_color=C["bg"], corner_radius=0,
-                                           scrollbar_button_color=C["scroll"],
-                                           scrollbar_button_hover_color=C["scroll_hover"])
+        self.list = scroll_area(self)
         self.list.grid(row=2, column=0, sticky="nsew", padx=(20, 8))
         self.empty = label(self.list, "", app.fonts.body, "muted", anchor="center", justify="center")
         self.protected_header = ctk.CTkFrame(self.list, fg_color="transparent")
@@ -423,13 +438,13 @@ class ListPage(ctk.CTkFrame):
                 meta = " · ".join(p for p in (app.tn("n_windows", len(windows)), exe, t("pid", pid=first.pid)) if p)
                 titles = [w.title for w in windows]
                 entries.append(Entry(key, key, name, meta, " ".join([name] + titles).casefold(), titles,
-                                     first.exe_path, first.protected, len(windows)))
+                                     first.exe_path, first.protected))
         else:
             for w in self.windows:
                 app_name = app.display_name(w.exe_path) or t("process_n", pid=w.pid)
                 meta = f"{app_name} · {t('pid', pid=w.pid)}"
                 entries.append(Entry(("window", w.hwnd), w.key, shorten(w.title), meta,
-                                     f"{w.title} {app_name}".casefold(), [], w.exe_path, w.protected, 1))
+                                     f"{w.title} {app_name}".casefold(), [], w.exe_path, w.protected))
         entries.sort(key=lambda e: (e.protected, e.name.casefold()))
         self.entries = entries
         selectable = {e.proc_key for e in entries if not e.protected}
@@ -772,9 +787,7 @@ class ClosingPage(ctk.CTkFrame):
         self.progress = ctk.CTkProgressBar(self, height=6, corner_radius=3, fg_color=C["inset"], progress_color=ACCENT)
         self.progress.grid(row=1, column=0, sticky="ew", padx=36, pady=(16, 18))
 
-        self.list = ctk.CTkScrollableFrame(self, fg_color=C["bg"], corner_radius=0,
-                                           scrollbar_button_color=C["scroll"],
-                                           scrollbar_button_hover_color=C["scroll_hover"])
+        self.list = scroll_area(self)
         self.list.grid(row=2, column=0, sticky="nsew", padx=(28, 8))
 
         bar = ctk.CTkFrame(self, fg_color=C["bar"], corner_radius=0)
@@ -946,11 +959,7 @@ class LogPage(ctk.CTkFrame):
         t = app.t
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
-        header = ctk.CTkFrame(self, fg_color="transparent")
-        header.grid(row=0, column=0, sticky="ew", padx=28, pady=(22, 14))
-        texts = ctk.CTkFrame(header, fg_color="transparent")
-        texts.pack(side="left", fill="x", expand=True)
-        label(texts, t("log_title"), app.fonts.title).pack(fill="x")
+        header, texts = page_header(self, app, t("log_title"))
         label(texts, str(settings_mod.log_path()), app.fonts.small, "muted").pack(fill="x", pady=(2, 0))
         ghost_button(header, app, t("log_open_file"), self.open_file).pack(side="right")
         ghost_button(header, app, t("refresh"), self.load).pack(side="right", padx=(0, 8))
@@ -989,11 +998,7 @@ class BackgroundPage(ctk.CTkFrame):
         t = app.t
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(2, weight=1)
-        header = ctk.CTkFrame(self, fg_color="transparent")
-        header.grid(row=0, column=0, sticky="ew", padx=28, pady=(22, 10))
-        titles = ctk.CTkFrame(header, fg_color="transparent")
-        titles.pack(side="left", fill="x", expand=True)
-        label(titles, t("background_title"), app.fonts.title).pack(fill="x")
+        header, titles = page_header(self, app, t("background_title"), pady=(22, 10))
         self.summary = label(titles, "", app.fonts.body, "muted")
         self.summary.pack(fill="x", pady=(2, 0))
         ghost_button(header, app, t("refresh"), self.load).pack(side="right", anchor="n")
@@ -1001,34 +1006,52 @@ class BackgroundPage(ctk.CTkFrame):
         options = ctk.CTkFrame(self, fg_color="transparent")
         options.grid(row=1, column=0, sticky="ew", padx=28, pady=(0, 12))
         self.include_system = ctk.BooleanVar(value=app.settings["background_include_system"])
-        ctk.CTkSwitch(options, text=t("background_include_system"), variable=self.include_system,
-                      command=self._on_include_system, font=app.fonts.body, text_color=C["text"],
-                      switch_width=40, switch_height=22, progress_color=ACCENT, button_color=WHITE,
-                      button_hover_color="#f0f2f5", fg_color=("#b8c0cc", "#4a505c")).pack(fill="x")
+        switch(options, self.include_system, self._on_include_system, t("background_include_system"),
+               app.fonts.body).pack(fill="x")
         self.hint = label(options, t("background_hint"), app.fonts.small, "muted", wraplength=680)
         self.hint.pack(fill="x", pady=(6, 0))
 
-        self.list = ctk.CTkScrollableFrame(self, fg_color=C["bg"], corner_radius=0, scrollbar_button_color=C["scroll"],
-                                           scrollbar_button_hover_color=C["scroll_hover"])
+        self.list = scroll_area(self)
         self.list.grid(row=2, column=0, sticky="nsew", padx=(20, 8), pady=(0, 20))
         self.report = None
+        self.generation = 0   # the latest read; older ones arriving late are dropped
 
     def _on_include_system(self):
         self.app.update_settings(background_include_system=bool(self.include_system.get()))
         self.load()
 
     def load(self):
+        """Read the processes on a worker thread: opening every process can take a moment and the
+        window must stay responsive. The current rows stay until the new ones are ready."""
+        self.generation += 1
+        generation, include_system = self.generation, self.app.settings["background_include_system"]
+
+        def read():
+            try:
+                result = core.background_processes(core.list_windows(), include_system=include_system)
+            except Exception as exc:   # shown on the page; never lost in a dead thread
+                if not isinstance(exc, OSError):
+                    log.exception("background processes")
+                result = exc
+            self.app.call_soon(lambda: self._show(generation, result))
+        threading.Thread(target=read, name="background", daemon=True).start()
+
+    def _show(self, generation, result):
+        if generation != self.generation:
+            return
+        try:
+            if not self.winfo_exists():
+                return
+        except tk.TclError:
+            return   # page rebuilt meanwhile (language change)
         app, t = self.app, self.app.t
         for child in self.list.winfo_children():
             child.destroy()
-        try:
-            self.report = core.background_processes(core.list_windows(),
-                                                    include_system=app.settings["background_include_system"])
-        except OSError as exc:
+        if isinstance(result, Exception):
             self.report = None
-            self.summary.configure(text=t("background_error", error=exc))
+            self.summary.configure(text=t("background_error", error=result))
             return
-        report = self.report
+        self.report = report = result
         if not report.top:
             self.summary.configure(text=t("background_empty"))
             return
@@ -1076,8 +1099,7 @@ class SettingsPage(ctk.CTkFrame):
         self.app = app
         t, s = app.t, app.settings
         self.save_job = None
-        scroll = ctk.CTkScrollableFrame(self, fg_color=C["bg"], corner_radius=0, scrollbar_button_color=C["scroll"],
-                                        scrollbar_button_hover_color=C["scroll_hover"])
+        scroll = scroll_area(self)
         scroll.pack(fill="both", expand=True, padx=(20, 8))
         label(scroll, t("settings_title"), app.fonts.title).pack(fill="x", padx=8, pady=(22, 0))
         label(scroll, t("settings_subtitle", path=settings_mod.data_dir()), app.fonts.body, "muted").pack(
@@ -1210,11 +1232,8 @@ class SettingsPage(ctk.CTkFrame):
         row = ctk.CTkFrame(master, fg_color="transparent")
         row.pack(fill="x", pady=6)
         variable = ctk.BooleanVar(value=self.app.settings[key])
-        switch = ctk.CTkSwitch(row, text="", variable=variable, width=46, switch_width=40, switch_height=22,
-                               progress_color=ACCENT, button_color=WHITE, button_hover_color="#f0f2f5",
-                               fg_color=("#b8c0cc", "#4a505c"),
-                               command=lambda: self.app.update_settings(**{key: bool(variable.get())}))
-        switch.pack(side="right", padx=(12, 0))
+        toggle = switch(row, variable, lambda: self.app.update_settings(**{key: bool(variable.get())}), width=46)
+        toggle.pack(side="right", padx=(12, 0))
         texts = ctk.CTkFrame(row, fg_color="transparent")
         texts.pack(side="left", fill="x", expand=True)
         title_label = label(texts, title, self.app.fonts.body)
@@ -1222,7 +1241,7 @@ class SettingsPage(ctk.CTkFrame):
         hint_label = label(texts, hint, self.app.fonts.small, "muted")
         hint_label.pack(fill="x")
         for widget in (texts, title_label, hint_label):
-            widget.bind("<Button-1>", lambda _e: switch.toggle())
+            widget.bind("<Button-1>", lambda _e: toggle.toggle())
 
     def _on_language(self, value):
         code = next(code for code, name in self.language_values if name == value)
@@ -1291,9 +1310,9 @@ class Updates:
         self.running = True
         self.set_status("update_checking")
         self._thread(self.module.fetch_latest, lambda release: self._checked(release, automatic),
-                     lambda exc: self._failed(exc, automatic))
+                     self._failed)
 
-    def _failed(self, exc, automatic):
+    def _failed(self, exc):
         self.running = False
         log.info("update check failed: %s %s", exc.key, exc.values)
         self.set_status("update_failed", error=(exc.key, exc.values))
@@ -1337,7 +1356,7 @@ class Updates:
 
         self._thread(lambda: self.module.update(exe, release, progress=progress),
                      lambda path: self._installed(release, path, restart),
-                     lambda exc: self._failed(exc, not restart))
+                     self._failed)
 
     def _installed(self, release, path, restart):
         self.running = False
@@ -1377,7 +1396,6 @@ class NavButton(ctk.CTkFrame):
         self.text.pack()
         for widget in (self, self.icon, self.text):
             widget.bind("<Button-1>", lambda _e: app.show(name))
-        self.enabled = True
 
     def set_active(self, active):
         self.configure(fg_color=C["rail_active"] if active else "transparent")

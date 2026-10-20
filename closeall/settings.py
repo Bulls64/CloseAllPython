@@ -20,8 +20,7 @@ DEFAULT_SETTINGS = {
     "background_include_system": False,
 }
 THEMES = ("system", "light", "dark")
-BOOL_KEYS = ("group_by_app", "show_icons", "confirm_before_terminate", "instant_force", "auto_update",
-            "background_include_system")
+BOOL_KEYS = tuple(key for key, value in DEFAULT_SETTINGS.items() if isinstance(value, bool))
 TIMEOUT_MIN, TIMEOUT_MAX = 1, 60
 
 LOGGER_NAME = "closeallpython"

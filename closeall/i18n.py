@@ -45,12 +45,10 @@ TEXT = {
         "instant_force_hint": "End the selected applications immediately, without asking them to close first",
         "cli_help_graceful": "ask applications to close normally and wait for the timeout instead of force-stopping them immediately",
         "cli_force_graceful": "--force and --graceful cannot be combined",
-        "close_explorer": "Close Explorer windows",
         "explorer_closed_one": "{count} File Explorer window was closed.",
         "explorer_closed_many": "{count} File Explorer windows were closed.",
         "explorer_none": "No File Explorer window is open.",
         "cli_windowless_failed": "Not every window could be closed:\n\n{details}\n\nApplications started as administrator can only be closed by CloseAllPython in administrator mode. Details are in the log.",
-        "restart_explorer": "Restart Explorer",
         "explorer_group": "File Explorer",
         "close_explorer_short": "Close windows",
         "restart_explorer_short": "Restart",
@@ -269,12 +267,10 @@ TEXT = {
         "instant_force_hint": "Terminer immédiatement les applications sélectionnées, sans leur demander de se fermer d’abord",
         "cli_help_graceful": "demander une fermeture normale et attendre le délai au lieu d’arrêter de force immédiatement",
         "cli_force_graceful": "--force et --graceful sont incompatibles",
-        "close_explorer": "Fermer les fenêtres de l’Explorateur",
         "explorer_closed_one": "{count} fenêtre de l’Explorateur de fichiers a été fermée.",
         "explorer_closed_many": "{count} fenêtres de l’Explorateur de fichiers ont été fermées.",
         "explorer_none": "Aucune fenêtre de l’Explorateur de fichiers n’est ouverte.",
         "cli_windowless_failed": "Toutes les fenêtres n’ont pas pu être fermées :\n\n{details}\n\nLes applications lancées en administrateur ne peuvent être fermées que par CloseAllPython en mode administrateur. Les détails sont dans le journal.",
-        "restart_explorer": "Redémarrer l’Explorateur",
         "explorer_group": "Explorateur de fichiers",
         "close_explorer_short": "Fermer les fenêtres",
         "restart_explorer_short": "Redémarrer",
@@ -467,23 +463,21 @@ def translate_n(language, key, count, **values):
     return translate(language, f"{key}_{'one' if singular else 'many'}", count=count, **values)
 
 
+def _decimal_mark(language, text):
+    return text.replace(".", ",") if language == "fr" else text
+
+
 def format_seconds(language, value):
     """1.2 -> '1.2' in English, '1,2' in French."""
-    text = f"{value:.1f}".rstrip("0").rstrip(".")
-    return text.replace(".", ",") if language == "fr" else text
+    return _decimal_mark(language, f"{value:.1f}".rstrip("0").rstrip("."))
 
 
 def format_memory(language, size):
     """Bytes in the Task Manager's units: '412 MB' / '1,3 Go' (binary multiples)."""
     megabytes = size / (1024 * 1024)
     if megabytes >= 1024:
-        return translate(language, "memory_gb", value=_decimal(language, megabytes / 1024))
+        return translate(language, "memory_gb", value=_decimal_mark(language, f"{megabytes / 1024:.1f}"))
     if megabytes >= 10 or megabytes == 0:
         return translate(language, "memory_mb", value=str(round(megabytes)))
-    return translate(language, "memory_mb", value=_decimal(language, megabytes))
-
-
-def _decimal(language, value):
-    text = f"{value:.1f}"
-    return text.replace(".", ",") if language == "fr" else text
+    return translate(language, "memory_mb", value=_decimal_mark(language, f"{megabytes:.1f}"))
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.9.2 (2026-10-20)
+
+Code clean-up (no change in what the application does)
+- Removed dead code: Windows functions nothing called any more (DPI awareness, window check, window icon reading and its timed message), an unused force-stop helper, the duplicate shortcut lookup, an unused list field and button flag, and two texts left over from the former Explorer buttons.
+- Shared code instead of copies: one definition of what windows and close targets have in common, one switch style, one page header, one scrolling list, one bitmap header for icons, one decimal-mark rule for numbers, the boolean settings derived from the defaults.
+- The Background screen reads the processes on a worker thread, so the window stays responsive while it opens every process; the current list stays visible until the new one is ready.
+- Restarting File Explorer reads the Windows session once instead of at every check.
+
 ## 1.9.1 (2026-10-20)
 
 Fixes from the review of 1.9.0
@@ -122,6 +130,14 @@ Project
 ---
 
 # Journal des modifications (version française)
+
+## 1.9.2 (2026-10-20)
+
+Nettoyage du code (aucun changement dans ce que fait l'application)
+- Code mort supprimé : fonctions Windows qui n'étaient plus appelées (prise en compte du DPI, test d'existence d'une fenêtre, lecture de l'icône d'une fenêtre et son message avec délai), une fonction d'arrêt forcé inutilisée, la recherche de raccourci en double, un champ de liste et un indicateur de bouton jamais lus, et deux textes laissés par les anciens boutons de l'Explorateur.
+- Code partagé au lieu de copies : une seule définition de ce qu'ont en commun fenêtres et cibles de fermeture, un seul style d'interrupteur, un seul en-tête de page, une seule liste défilante, un seul en-tête d'image pour les icônes, une seule règle de séparateur décimal, et des paramètres booléens déduits des valeurs par défaut.
+- L'écran Arrière-plan lit les processus sur un fil d'exécution séparé : la fenêtre reste réactive pendant qu'il ouvre chaque processus, et la liste actuelle reste affichée jusqu'à ce que la nouvelle soit prête.
+- Le redémarrage de l'Explorateur lit la session Windows une seule fois au lieu de le faire à chaque vérification.
 
 ## 1.9.1 (2026-10-20)
 

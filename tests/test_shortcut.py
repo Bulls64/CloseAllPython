@@ -109,10 +109,10 @@ class CreateTests(unittest.TestCase):
 
     def test_find(self):
         shell = FakeShell(self.desktop)
-        self.assertIsNone(shortcut.find("Tout fermer", factory=lambda: shell))
+        self.assertIsNone(shortcut.find_any(["Tout fermer"], factory=lambda: shell))
         (self.desktop / "Tout fermer.lnk").write_bytes(b"lnk")
-        self.assertEqual(shortcut.find("Tout fermer", factory=lambda: shell), self.desktop / "Tout fermer.lnk")
-        self.assertEqual(shortcut.find("Tout fermer", folder=self.desktop), self.desktop / "Tout fermer.lnk")
+        self.assertEqual(shortcut.find_any(["Tout fermer"], factory=lambda: shell), self.desktop / "Tout fermer.lnk")
+        self.assertEqual(shortcut.find_any(["Tout fermer"], folder=self.desktop), self.desktop / "Tout fermer.lnk")
 
     def test_find_any_language(self):
         shell = FakeShell(self.desktop)
@@ -125,7 +125,7 @@ class CreateTests(unittest.TestCase):
         def broken():
             raise OSError("no shell")
 
-        self.assertIsNone(shortcut.find("Tout fermer", factory=broken))
+        self.assertIsNone(shortcut.find_any(["Tout fermer"], factory=broken))
 
     def test_file_name_is_safe(self):
         self.assertEqual(shortcut._file_name('a/b:c*"'), "a-b-c--.lnk")
@@ -155,7 +155,7 @@ class WindowsShortcutTests(unittest.TestCase):
             self.assertEqual(Path(link.TargetPath), Path(folder) / "CloseAllPython.exe")
             self.assertEqual(link.Arguments, "--no-ui --all -y")
             self.assertEqual(link.Description, "Description")
-            self.assertEqual(shortcut.find("Tout fermer", folder=folder), path)
+            self.assertEqual(shortcut.find_any(["Tout fermer"], folder=folder), path)
 
 
 if __name__ == "__main__":
