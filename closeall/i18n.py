@@ -388,6 +388,7 @@ TEXT = {
         "cli_failed": "Impossible d’arrêter {pid} ({name}) : {error}",
         "cli_summary": "{closed} fermé(s), {forced} arrêté(s) de force, {still} toujours actif(s), {failed} en échec, {skipped} ignoré(s).",
         # Mises à jour
+        # Updates
         "auto_update": "Mettre à jour automatiquement au démarrage",
         "auto_update_hint": "Vérifie GitHub au lancement et installe les nouvelles versions",
         "section_shortcut": "Raccourci",
