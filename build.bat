@@ -19,7 +19,7 @@ set "PY=.venv\Scripts\python.exe"
 "%PY%" --version
 
 echo Installing pinned dependencies...
-"%PY%" -m pip install --disable-pip-version-check -r requirements-build.txt
+"%PY%" -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements-build.txt
 if errorlevel 1 goto failed
 
 echo Running tests...

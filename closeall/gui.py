@@ -1338,7 +1338,7 @@ class Updates:
     def _open_page(self, release):
         import webbrowser
 
-        webbrowser.open(release.page)
+        webbrowser.open(self.module.release_page(release.page))   # checked again: never a local file
 
     def install(self, release, exe, restart):
         if self.running:

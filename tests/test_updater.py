@@ -11,7 +11,7 @@ from unittest import mock
 from closeall import __version__, cli, settings, updater
 
 EXE = b"MZ" + b"\x90" * 5000
-URL = updater.DOWNLOAD_PREFIX + "v9.0.0/"
+URL = f"https://github.com/{updater.REPOSITORY}/releases/download/v9.0.0/"
 
 
 class Response(io.BytesIO):
@@ -101,6 +101,56 @@ class FetchTests(unittest.TestCase):
     def test_foreign_download_url_is_refused(self):
         data = release_json()
         data["assets"][0]["browser_download_url"] = "https://example.com/CloseAllPython.exe"
+        release = updater.fetch_latest(Opener(data))
+        with self.assertRaises(updater.UpdateError):
+            updater.asset_for(release, "CloseAllPython.exe")
+
+
+class UrlTests(unittest.TestCase):
+    BASE = "https://github.com/Bulls64/CloseAllPython"
+
+    def test_accepted(self):
+        for url in (self.BASE + "/releases/download/v1.9.3/CloseAllPython.exe",
+                    "https://github.com/bulls64/closeallpython/releases/download/v1.9.3/CloseAllPython.exe"):
+            self.assertTrue(updater.is_project_url(url, "releases/download"), url)
+        self.assertTrue(updater.is_project_url(self.BASE + "/releases/tag/v1.9.3", "releases"))
+
+    def test_refused(self):
+        for url in (
+            self.BASE + "/releases/download/../../../../attacker/repo/releases/download/v9/x.exe",
+            self.BASE + "/releases/download/%2e%2e/%2e%2e/x.exe",
+            self.BASE + "/releases/download/./v9/x.exe",
+            self.BASE + "//releases/download/v9/x.exe",
+            "http://github.com/Bulls64/CloseAllPython/releases/download/v9/x.exe",
+            "https://github.com.evil.com/Bulls64/CloseAllPython/releases/download/v9/x.exe",
+            "https://github.com@evil.com/Bulls64/CloseAllPython/releases/download/v9/x.exe",
+            "https://user@github.com/Bulls64/CloseAllPython/releases/download/v9/x.exe",
+            "https://github.com:8443/Bulls64/CloseAllPython/releases/download/v9/x.exe",
+            "https://github.com/Other/CloseAllPython/releases/download/v9/x.exe",
+            self.BASE + "/releases/download/v9/x.exe?redirect=evil",
+            self.BASE + "/releases/download/",
+            self.BASE + "\\releases\\download\\x.exe",
+            "\\\\server\\share\\x.exe",
+            r"C:\Windows\System32\calc.exe",
+            "file:///C:/Windows/System32/calc.exe",
+            None,
+        ):
+            self.assertFalse(updater.is_project_url(url, "releases/download"), url)
+
+    def test_page_falls_back_to_the_releases_page(self):
+        for page in (r"\\server\share\x.exe", "file:///C:/x.exe", "https://evil.com/releases/tag/v9", None, ""):
+            self.assertEqual(updater.release_page(page), updater.RELEASES_PAGE, page)
+        good = self.BASE + "/releases/tag/v1.9.3"
+        self.assertEqual(updater.release_page(good), good)
+
+    def test_fetch_keeps_only_a_safe_page(self):
+        data = release_json()
+        data["html_url"] = r"\\server\share\setup.exe"
+        self.assertEqual(updater.fetch_latest(Opener(data)).page, updater.RELEASES_PAGE)
+
+    def test_traversal_download_is_refused(self):
+        data = release_json()
+        data["assets"][0]["browser_download_url"] = URL + "../../../../attacker/repo/releases/download/v9/CloseAllPython.exe"
         release = updater.fetch_latest(Opener(data))
         with self.assertRaises(updater.UpdateError):
             updater.asset_for(release, "CloseAllPython.exe")

@@ -156,6 +156,7 @@ _proto(kernel32.Process32NextW, wintypes.BOOL, wintypes.HANDLE, ctypes.POINTER(P
 _proto(ntdll.NtQuerySystemInformation, ctypes.c_ulong, wintypes.ULONG, ctypes.c_void_p, wintypes.ULONG,
        ctypes.POINTER(wintypes.ULONG))
 _proto(kernel32.GetConsoleWindow, wintypes.HWND)
+_proto(kernel32.GetWindowsDirectoryW, wintypes.UINT, wintypes.LPWSTR, wintypes.UINT)
 _proto(kernel32.ProcessIdToSessionId, wintypes.BOOL, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD))
 _proto(user32.InternalGetWindowText, ctypes.c_int, wintypes.HWND, wintypes.LPWSTR, ctypes.c_int)
 _proto(user32.GetDC, wintypes.HDC, wintypes.HWND)
@@ -328,9 +329,18 @@ def current_session():
     return session.value
 
 
+def windows_directory():
+    """The Windows folder as Windows reports it (the SystemRoot variable could be changed)."""
+    buffer = ctypes.create_unicode_buffer(260)
+    length = kernel32.GetWindowsDirectoryW(buffer, len(buffer))
+    if not 0 < length < len(buffer):
+        raise _last_error()
+    return buffer.value
+
+
 def start_explorer():
     """Start the Windows shell (desktop, taskbar, Start menu)."""
-    windows = os.environ.get("SystemRoot") or r"C:\Windows"
+    windows = windows_directory()
     subprocess.Popen([os.path.join(windows, "explorer.exe")], close_fds=True)  # noqa: S603 - fixed system path
 
 

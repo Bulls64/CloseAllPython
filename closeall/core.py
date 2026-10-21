@@ -359,7 +359,8 @@ def close_explorer_windows():
     return closed
 
 
-EXPLORER_RESTART_WAIT = 8.0   # seconds left to Windows to restart the shell by itself
+EXPLORER_RESTART_WAIT = 8.0            # seconds left to Windows to restart the shell by itself
+EXPLORER_RESTART_WAIT_ELEVATED = 20.0  # longer when this program may not start it (administrator)
 
 
 def explorer_processes(session=None):
@@ -368,14 +369,21 @@ def explorer_processes(session=None):
     return [p for p in winapi.system_processes() if p.name.lower() == "explorer.exe" and p.session == session]
 
 
-def restart_explorer(wait=EXPLORER_RESTART_WAIT, sleep=time.sleep, clock=time.monotonic):
+def restart_explorer(wait=None, sleep=time.sleep, clock=time.monotonic, start_if_missing=None):
     """Stop File Explorer (desktop, taskbar and folder windows) and bring it back.
 
     Every explorer.exe of this session is force-stopped with a non-zero exit code: Windows
     then restarts the shell by itself, as the user's own process. When it has not done so
-    after `wait` seconds, explorer.exe is started from here. Returns "restarted" (by Windows)
-    or "started" (by this program); raises ProcessError when no Explorer process could be stopped.
+    after `wait` seconds, explorer.exe is started from here, but never when this program runs
+    as administrator: the shell would inherit those rights and every program started from the
+    taskbar or the Start menu would run as administrator without a UAC prompt. Returns
+    "restarted" (by Windows) or "started" (by this program); raises ProcessError when no Explorer
+    process could be stopped, or "explorer_not_restarted" when it may not be started from here.
     """
+    if start_if_missing is None:
+        start_if_missing = not winapi.is_admin()
+    if wait is None:
+        wait = EXPLORER_RESTART_WAIT if start_if_missing else EXPLORER_RESTART_WAIT_ELEVATED
     session = winapi.current_session()
     old = explorer_processes(session)
     stopped, error = 0, None
@@ -409,6 +417,9 @@ def restart_explorer(wait=EXPLORER_RESTART_WAIT, sleep=time.sleep, clock=time.mo
         if clock() >= deadline:
             break
         sleep(0.25)
+    if not start_if_missing:
+        log.warning("explorer_not_restarted elevated=True")
+        raise ProcessError("explorer_not_restarted")
     winapi.start_explorer()
     log.info("explorer_restarted by=closeallpython")
     return "started"

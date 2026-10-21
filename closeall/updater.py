@@ -15,6 +15,7 @@ import re
 import subprocess
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,7 +28,6 @@ log = logging.getLogger(LOGGER_NAME)
 REPOSITORY = "Bulls64/CloseAllPython"
 LATEST_API = f"https://api.github.com/repos/{REPOSITORY}/releases/latest"
 RELEASES_PAGE = f"https://github.com/{REPOSITORY}/releases/latest"
-DOWNLOAD_PREFIX = f"https://github.com/{REPOSITORY}/releases/download/"
 GUI_ASSET, CLI_ASSET = "CloseAllPython.exe", "CloseAllPython-CLI.exe"
 API_TIMEOUT, DOWNLOAD_TIMEOUT = 10, 60
 CHUNK = 256 * 1024
@@ -61,6 +61,39 @@ class Release:
     @property
     def label(self):
         return ".".join(map(str, self.version))
+
+
+def is_project_url(url, section):
+    """True only for https://github.com/Bulls64/CloseAllPython/<section>/... with a clean path.
+
+    The release data comes from the network: a download or a page address is accepted only when
+    it points to this repository on github.com. No user name, port, query, backslash, encoded
+    character or "." / ".." segment (which would let ".../releases/download/../../other/repo"
+    reach another repository).
+    """
+    if not isinstance(url, str):
+        return False
+    try:
+        parts = urllib.parse.urlsplit(url)
+        port = parts.port
+    except ValueError:
+        return False
+    if parts.scheme != "https" or parts.netloc.lower() != "github.com" or port is not None:
+        return False
+    if parts.query or parts.fragment or "\\" in url or "%" in parts.path:
+        return False
+    segments = parts.path.split("/")[1:]
+    if any(segment in ("", ".", "..") for segment in segments):
+        return False
+    owner, repository = REPOSITORY.lower().split("/")
+    expected = [owner, repository, *section.lower().split("/")]
+    # GitHub ignores the case of owner and repository names; something must follow the section.
+    return len(segments) > len(expected) and [s.lower() for s in segments[:len(expected)]] == expected
+
+
+def release_page(url):
+    """`url` when it is a page of this repository's releases, else the latest-release page."""
+    return url if is_project_url(url, "releases") else RELEASES_PAGE
 
 
 def parse_version(text):
@@ -100,7 +133,7 @@ def fetch_latest(opener=urllib.request.urlopen):
             assets[item["name"].lower()] = Asset(
                 item["name"], item["browser_download_url"], int(item["size"]),
                 digest[7:].lower() if digest.startswith("sha256:") else None)
-        return Release(data["tag_name"], version, data.get("html_url") or RELEASES_PAGE, assets)
+        return Release(data["tag_name"], version, release_page(data.get("html_url")), assets)
     except (KeyError, TypeError, ValueError) as exc:
         raise UpdateError("update_err_response") from exc
 
@@ -120,7 +153,7 @@ def asset_for(release, exe_path):
         raise UpdateError("update_err_no_asset", name=ntpath.basename(str(exe_path)))
     if not asset.sha256:
         raise UpdateError("update_err_unverifiable", name=asset.name)
-    if not asset.url.startswith(DOWNLOAD_PREFIX) or not 0 < asset.size <= MAX_SIZE:
+    if not is_project_url(asset.url, "releases/download") or not 0 < asset.size <= MAX_SIZE:
         raise UpdateError("update_err_response")
     return asset
 

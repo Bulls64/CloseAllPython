@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.9.3 (2026-10-21)
+
+Security fixes from the code review
+- Restart File Explorer, administrator mode: the application no longer starts explorer.exe itself when it runs as administrator. File Explorer would have inherited those rights, and so would every program started afterwards from the taskbar or the Start menu, without a UAC prompt. Windows restarts it with your normal rights (the application waits up to 20 seconds); otherwise a message explains how to start it without administrator rights.
+- Updates: the download and release-page addresses read from GitHub are accepted only when they point to this repository on github.com, with a clean path (no "..", encoded characters, user name, port or query). Before, ".../releases/download/../../other/repo/..." passed the check, and the release page was opened as given, which on Windows can start a local or network program.
+- explorer.exe is started from the Windows folder reported by Windows, not from the SystemRoot environment variable.
+- Build: every Python package (dependencies included) is pinned with the SHA-256 of its files and installed from wheels only, in GitHub Actions and in build.bat; the GitHub actions are pinned to a commit instead of a movable tag.
+
 ## 1.9.2 (2026-10-20)
 
 Code clean-up (no change in what the application does)
@@ -130,6 +138,14 @@ Project
 ---
 
 # Journal des modifications (version française)
+
+## 1.9.3 (2026-10-21)
+
+Corrections de sécurité issues de la revue du code
+- Redémarrer l'Explorateur en mode administrateur : l'application ne lance plus explorer.exe elle-même quand elle tourne en administrateur. L'Explorateur aurait hérité de ces droits, comme tout programme lancé ensuite depuis la barre des tâches ou le menu Démarrer, sans demande UAC. Windows le relance avec vos droits normaux (l'application attend jusqu'à 20 secondes) ; sinon un message explique comment le relancer sans droits administrateur.
+- Mises à jour : les adresses de téléchargement et de page de release lues sur GitHub ne sont acceptées que si elles désignent ce dépôt sur github.com, avec un chemin propre (pas de « .. », de caractères encodés, de nom d'utilisateur, de port ni de paramètres). Avant, « …/releases/download/../../autre/depot/… » passait le contrôle, et la page de release était ouverte telle quelle, ce qui sous Windows peut lancer un programme local ou réseau.
+- explorer.exe est lancé depuis le dossier Windows indiqué par Windows, et non par la variable d'environnement SystemRoot.
+- Compilation : chaque paquet Python (dépendances comprises) est figé par l'empreinte SHA-256 de ses fichiers et installé uniquement depuis des wheels, dans GitHub Actions comme dans build.bat ; les actions GitHub sont figées par commit au lieu d'une étiquette modifiable.
 
 ## 1.9.2 (2026-10-20)
 

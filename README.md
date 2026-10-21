@@ -34,7 +34,7 @@ CloseAllPython lists the windows you see in Alt+Tab and closes the applications 
 - **Windows stays usable.** Shell processes (Explorer, ApplicationFrameHost, TextInputHost…) are listed apart and can never be closed.
 - **No wrong target.** Before acting, each process ID is checked against its creation time, so a recycled PID is never killed.
 - **Close Explorer windows.** Closes every File Explorer folder window (all tabs) while the desktop and taskbar keep running.
-- **Restart File Explorer.** Restarts explorer.exe (taskbar, desktop, Start menu) when it freezes or misbehaves, after a confirmation.
+- **Restart File Explorer.** Restarts explorer.exe (taskbar, desktop, Start menu) when it freezes or misbehaves, after a confirmation. In administrator mode, Windows restarts it with your normal rights; the application never starts it itself there, so File Explorer never runs as administrator.
 - **Live list.** The list refreshes by itself after a closing; icons load in the background.
 - **Updates from GitHub.** *Check for updates* in the settings, or turn on the automatic update at startup; each download is verified against the SHA-256 checksum published by GitHub before it replaces the program.
 - **Background memory.** The 10 windowless processes using the most memory, measured like the Task Manager, even without administrator rights.
@@ -175,7 +175,7 @@ CloseAllPython liste les fenêtres visibles dans Alt+Tab et ferme les applicatio
 - **Windows reste utilisable.** Les processus du shell (Explorer, ApplicationFrameHost, TextInputHost…) sont listés à part et ne peuvent jamais être fermés.
 - **Aucune erreur de cible.** Avant d'agir, chaque identifiant de processus est vérifié grâce à son heure de création : un PID recyclé n'est jamais tué.
 - **Fermer les fenêtres de l'Explorateur.** Ferme toutes les fenêtres de dossiers de l'Explorateur de fichiers (tous les onglets) ; le bureau et la barre des tâches continuent de fonctionner.
-- **Redémarrer l'Explorateur.** Relance explorer.exe (barre des tâches, bureau, menu Démarrer) quand il est figé ou se comporte mal, après confirmation.
+- **Redémarrer l'Explorateur.** Relance explorer.exe (barre des tâches, bureau, menu Démarrer) quand il est figé ou se comporte mal, après confirmation. En mode administrateur, c'est Windows qui le relance avec vos droits normaux ; l'application ne le lance jamais elle-même dans ce mode, pour que l'Explorateur ne tourne jamais en administrateur.
 - **Liste en direct.** La liste s'actualise toute seule après une fermeture ; les icônes se chargent en arrière-plan.
 - **Mises à jour depuis GitHub.** *Rechercher des mises à jour* dans les paramètres, ou activez la mise à jour automatique au démarrage ; chaque téléchargement est vérifié avec l'empreinte SHA-256 publiée par GitHub avant de remplacer le programme.
 - **Mémoire en arrière-plan.** Les 10 processus sans fenêtre qui utilisent le plus de mémoire, mesurés comme dans le Gestionnaire des tâches, même sans droits administrateur.

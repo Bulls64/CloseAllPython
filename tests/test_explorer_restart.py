@@ -61,5 +61,34 @@ class RestartExplorerTests(unittest.TestCase):
         self.assertEqual([pid for pid, _ in self.system.terminated], [10])
 
 
+class ElevatedRestartTests(unittest.TestCase):
+    """Running as administrator, explorer.exe must never be started from here (elevated shell)."""
+
+    def setUp(self):
+        self.system = make_system()
+        self.system.admin = True
+        self.clock = FakeClock()
+
+    def test_never_started_when_elevated(self):
+        with self.assertRaises(core.ProcessError) as ctx:
+            core.restart_explorer(sleep=self.clock.sleep, clock=self.clock)
+        self.assertEqual(ctx.exception.key, "explorer_not_restarted")
+        self.assertNotIn(("start_explorer", None), self.system.calls)
+        self.assertGreaterEqual(self.clock.now, core.EXPLORER_RESTART_WAIT_ELEVATED)   # waited longer for Windows
+
+    def test_windows_restart_is_still_fine(self):
+        def sleep(seconds):
+            self.clock.sleep(seconds)
+            if self.clock.now >= 12 and 30 not in self.system.processes:
+                self.system.add_process(30, r"C:\Windows\explorer.exe", created=300)
+
+        self.assertEqual(core.restart_explorer(sleep=sleep, clock=self.clock), "restarted")
+
+    def test_message_exists(self):
+        from closeall import i18n
+        for language in ("en", "fr"):
+            self.assertIn("Ctrl", i18n.translate(language, "explorer_not_restarted", detail=""))
+
+
 if __name__ == "__main__":
     unittest.main()

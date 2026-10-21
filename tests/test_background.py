@@ -139,6 +139,8 @@ class WindowsProcessListTests(unittest.TestCase):
         self.assertEqual(me.created, winapi.process_info(os.getpid())[1])
         self.assertIn(4, processes)
         self.assertEqual(me.session, winapi.current_session())
+        windows = winapi.windows_directory()
+        self.assertTrue(os.path.isfile(os.path.join(windows, "explorer.exe")), windows)
 
 
 class SummaryTests(unittest.TestCase):
