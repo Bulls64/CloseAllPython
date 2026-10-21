@@ -109,6 +109,10 @@ class FetchTests(unittest.TestCase):
 class UrlTests(unittest.TestCase):
     BASE = "https://github.com/Bulls64/CloseAllPython"
 
+    def test_project_page_is_the_repository_itself(self):
+        self.assertEqual(updater.PROJECT_PAGE, self.BASE)
+        self.assertTrue(updater.is_project_url(updater.RELEASES_PAGE, "releases"))
+
     def test_accepted(self):
         for url in (self.BASE + "/releases/download/v1.9.3/CloseAllPython.exe",
                     "https://github.com/bulls64/closeallpython/releases/download/v1.9.3/CloseAllPython.exe"):

@@ -75,6 +75,8 @@ To close applications that run as administrator, use **Administrator mode** in t
 
 Closing an application closes all of its windows. The **Log** screen shows the latest actions; **Settings** are saved automatically.
 
+**About.** **Settings › About** shows the version, your rights, the log file and the address of the GitHub project (click it to open it).
+
 **Updates.** In **Settings › About**, *Check for updates* compares your version with the latest GitHub release and offers to install it; the application then restarts on the new version. With *Update automatically at startup* (off by default), the check runs each time the application opens and a new version is installed in the background, used from the next start or right away if you choose to restart. The application contacts GitHub only for these checks. If it sits in a folder you cannot write to (such as `Program Files`), download the new version from the release page instead.
 
 **Background processes.** The **Background** screen lists the 10 processes without any window that use the most memory (private working set, the Task Manager's "Memory" column), with the number of background processes and their total memory. Processes started by an application that has a window (a browser's or Steam's helpers) stay with it. Windows processes are hidden unless you turn on *Include Windows processes*. This screen only lists; nothing is closed from it.
@@ -211,6 +213,8 @@ Pour fermer des applications lancées en administrateur, utilisez **Mode adminis
 3. En mode normal, l'**écran de fermeture** affiche l'état de chaque application. Une application encore active après le délai peut être ramenée au premier plan (pour répondre à une demande d'enregistrement), laissée ouverte ou arrêtée de force.
 
 Fermer une application ferme toutes ses fenêtres. L'écran **Journal** affiche les dernières actions ; les **Paramètres** sont enregistrés automatiquement.
+
+**À propos.** **Paramètres › À propos** affiche la version, vos droits, le fichier journal et l'adresse du projet GitHub (un clic l'ouvre).
 
 **Mises à jour.** Dans **Paramètres › À propos**, *Rechercher des mises à jour* compare votre version avec la dernière release GitHub et propose de l'installer ; l'application redémarre alors sur la nouvelle version. Avec *Mettre à jour automatiquement au démarrage* (désactivé par défaut), la vérification a lieu à chaque ouverture et une nouvelle version s'installe en arrière-plan, utilisée au démarrage suivant ou tout de suite si vous choisissez de redémarrer. L'application ne contacte GitHub que pour ces vérifications. Si elle se trouve dans un dossier où vous ne pouvez pas écrire (comme `Program Files`), téléchargez la nouvelle version sur la page de la release.
 

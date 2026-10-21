@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.9.4 (2026-10-21)
+
+- Settings › About: a *Project* line with the address of the GitHub project (github.com/Bulls64/CloseAllPython); click it to open the page in your browser. The version was already shown there.
+
 ## 1.9.3 (2026-10-21)
 
 Security fixes from the code review
@@ -138,6 +142,10 @@ Project
 ---
 
 # Journal des modifications (version française)
+
+## 1.9.4 (2026-10-21)
+
+- Réglages › À propos : une ligne *Projet* avec l'adresse du projet GitHub (github.com/Bulls64/CloseAllPython) ; un clic ouvre la page dans le navigateur. La version y figurait déjà.
 
 ## 1.9.3 (2026-10-21)
 

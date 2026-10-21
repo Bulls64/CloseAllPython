@@ -26,6 +26,7 @@ from .settings import LOGGER_NAME
 log = logging.getLogger(LOGGER_NAME)
 
 REPOSITORY = "Bulls64/CloseAllPython"
+PROJECT_PAGE = f"https://github.com/{REPOSITORY}"   # shown in Settings › About
 LATEST_API = f"https://api.github.com/repos/{REPOSITORY}/releases/latest"
 RELEASES_PAGE = f"https://github.com/{REPOSITORY}/releases/latest"
 GUI_ASSET, CLI_ASSET = "CloseAllPython.exe", "CloseAllPython-CLI.exe"

@@ -1149,6 +1149,12 @@ class SettingsPage(ctk.CTkFrame):
         for index, (name, value) in enumerate(rows):
             label(facts, name, app.fonts.small, "muted").grid(row=index, column=0, sticky="w", pady=3, padx=(0, 24))
             label(facts, value, app.fonts.small).grid(row=index, column=1, sticky="w", pady=3)
+        label(facts, t("project"), app.fonts.small, "muted").grid(row=len(rows), column=0, sticky="w", pady=3,
+                                                                  padx=(0, 24))
+        project = ctk.CTkLabel(facts, text=updater.PROJECT_PAGE.removeprefix("https://"), font=app.fonts.small,
+                               text_color=ACCENT, cursor="hand2", anchor="w")
+        project.grid(row=len(rows), column=1, sticky="w", pady=3)
+        project.bind("<Button-1>", lambda event: self._open_project())
         buttons = ctk.CTkFrame(about, fg_color="transparent")
         buttons.pack(fill="x", pady=(14, 0))
         ghost_button(buttons, app, t("open_log"), lambda: app.show("log")).pack(side="left")
@@ -1179,6 +1185,11 @@ class SettingsPage(ctk.CTkFrame):
         self.shortcut_file = shortcut.find_any([t("shortcut_name")] + [
             texts["shortcut_name"] for code, texts in TEXT.items() if code != app.language])
         self._show_shortcut_status()
+
+    def _open_project(self):
+        import webbrowser
+
+        webbrowser.open(updater.PROJECT_PAGE)   # a fixed constant, never text from the network
 
     def _show_shortcut_status(self):
         file = self.shortcut_file
