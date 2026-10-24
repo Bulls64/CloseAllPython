@@ -75,6 +75,27 @@ class FetchTests(unittest.TestCase):
             updater.fetch_latest(Opener(error=urllib.error.URLError("offline")))
         self.assertEqual(ctx.exception.key, "update_err_network")
 
+    def test_rate_limit_is_named(self):
+        def http(code, **headers):
+            return urllib.error.HTTPError(updater.LATEST_API, code, "Forbidden", headers, None)
+
+        with self.assertRaises(updater.UpdateError) as ctx:
+            updater.fetch_latest(Opener(error=http(403, **{"X-RateLimit-Remaining": "0",
+                                                           "X-RateLimit-Reset": "4102444800"})))
+        self.assertEqual(ctx.exception.key, "update_err_rate_limit")
+        self.assertRegex(ctx.exception.values["time"], r"^\d\d:\d\d$")
+        error = updater._connection_error(http(429, **{"Retry-After": "60"}), clock=lambda: 1000.0)
+        self.assertEqual(error.key, "update_err_rate_limit")
+        self.assertEqual(updater._connection_error(http(403, **{"X-RateLimit-Remaining": "0"})).key,
+                         "update_err_rate_limit_soon")
+        # another 403 (blocked by a proxy, say) is an HTTP error, not the limit
+        error = updater._connection_error(http(403, **{"X-RateLimit-Remaining": "12"}))
+        self.assertEqual((error.key, error.values), ("update_err_http", {"code": 403}))
+        for language in ("en", "fr"):
+            from closeall import i18n
+            self.assertIn("{time}", i18n.TEXT[language]["update_err_rate_limit"])
+            self.assertIn("60", i18n.TEXT[language]["update_err_rate_limit_soon"])
+
     def test_bad_answer(self):
         with self.assertRaises(updater.UpdateError) as ctx:
             updater.fetch_latest(Opener(release={"message": "rate limited"}))

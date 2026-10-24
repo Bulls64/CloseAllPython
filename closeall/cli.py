@@ -73,6 +73,8 @@ def run_cli(args, prefs, out=None, err=None, stdin=None, problems=None):
     problems = [] if problems is None else problems
     from . import core
 
+    core.log_titles = prefs.get("log_window_titles", False)
+
     out = sys.stdout if out is None else out
     err = sys.stderr if err is None else err
     stdin = sys.stdin if stdin is None else stdin
@@ -191,7 +193,7 @@ def run_update(prefs, out=None, err=None, updater=None, exe_path=None):
 
 def self_test_checks():
     """What a built executable must manage: every module bundled, and each kind of system call
-    (window list, process memory, sessions, the COM object behind the desktop shortcut)."""
+    (window list, process memory, sessions, protected folders, the COM object behind the desktop shortcut)."""
     import importlib
     import os
 
@@ -212,13 +214,19 @@ def self_test_checks():
         from . import winapi
         winapi.current_session()
 
+    def folders():
+        from . import winapi
+        found = winapi.protected_folders()
+        if len(found) < 2 or not all(os.path.isdir(folder) for folder in found):
+            raise RuntimeError(f"Windows and Program Files folders not found: {found}")
+
     def shortcut_com():
         from . import shortcut
         if not shortcut._wscript_shell().SpecialFolders("Desktop"):
             raise RuntimeError("no desktop folder")
 
     return [("interface", gui), ("windows", windows), ("processes", processes), ("session", session),
-            ("shortcut", shortcut_com)]
+            ("folders", folders), ("shortcut", shortcut_com)]
 
 
 def run_self_test(out=None, err=None, checks=None):

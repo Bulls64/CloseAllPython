@@ -1,0 +1,43 @@
+name: Bug report / Signaler un bug
+description: Something does not work as expected / Quelque chose ne fonctionne pas comme prévu
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: CloseAllPython version / Version de CloseAllPython
+      description: Settings › About / Paramètres › À propos
+      placeholder: "1.9.5"
+    validations:
+      required: true
+  - type: dropdown
+    id: windows
+    attributes:
+      label: Windows
+      options: ["Windows 11", "Windows 10", "Other / Autre"]
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: How it was used / Utilisation
+      options:
+        - Application (CloseAllPython.exe)
+        - Command line / Ligne de commande (CloseAllPython-CLI.exe)
+        - Desktop shortcut / Raccourci du bureau
+        - From source / Depuis le code source
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps and result / Étapes et résultat
+      description: What you did, what you expected, what happened / Ce que vous avez fait, ce que vous attendiez, ce qui s'est passé
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log lines / Lignes du journal
+      description: "%APPDATA%\\CloseAllPython\\closeallpython.log — remove anything private / retirez ce qui est privé"
+      render: text

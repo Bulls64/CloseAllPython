@@ -286,10 +286,21 @@ def _error_result(target, error):
     return Result(target, FAILED, error.key, error.detail)
 
 
+# Window titles name documents, web pages and conversations: they go to the log only when the
+# user turns on Settings › log_window_titles (set by the application and the command line).
+log_titles = False
+
+
+def log_target(event, target, extra=""):
+    """One log line per close action: program, PID, number of windows, titles if allowed."""
+    titles = list(target.titles) if log_titles else []
+    log.info("%s pid=%s exe=%s windows=%s titles=%r%s", event, target.pid, target.exe_path, len(target.titles),
+             titles, extra)
+
+
 def _log(result):
-    t = result.target
-    log.info("%s pid=%s exe=%s titles=%r%s", result.status, t.pid, t.exe_path, t.titles,
-             f" error={result.error_key} {result.detail}".rstrip() if result.error_key else "")
+    log_target(result.status, result.target,
+               f" error={result.error_key} {result.detail}".rstrip() if result.error_key else "")
     return result
 
 
@@ -361,6 +372,21 @@ def close_explorer_windows():
 
 EXPLORER_RESTART_WAIT = 8.0            # seconds left to Windows to restart the shell by itself
 EXPLORER_RESTART_WAIT_ELEVATED = 20.0  # longer when this program may not start it (administrator)
+
+
+def unprotected_elevation_files():
+    """The files "Restart as administrator" would run that sit in a folder a standard user can change.
+
+    Elevating them hands administrator rights to whatever is there at that moment: another
+    program running in the session could have replaced them. Empty when every file is under
+    Windows or Program Files; when those folders cannot be read, every file is reported (warn).
+    """
+    try:
+        roots = [ntpath.normcase(ntpath.normpath(folder)).rstrip("\\") + "\\" for folder in winapi.protected_folders()]
+    except OSError:
+        roots = []
+    return [path for path in winapi.elevation_targets()
+            if not ntpath.normcase(ntpath.normpath(path)).startswith(tuple(roots))]
 
 
 def explorer_processes(session=None):

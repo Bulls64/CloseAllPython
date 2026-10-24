@@ -26,6 +26,8 @@ class FakeSystem:
         self.console = 0
         self.calls = []   # ("terminate" | "wait", pid), in call order
         self.admin = False
+        self.protected = [r"C:\Windows", r"C:\Program Files", r"C:\Program Files (x86)"]
+        self.elevation = [r"C:\Program Files\CloseAllPython\CloseAllPython.exe"]
 
     def add_process(self, pid, path, created=1000, ppid=0, exits_on_close=True, deny=False, memory=0, name=None,
                     session=1):
@@ -104,6 +106,9 @@ class FakeSystem:
                                         for pid, p in system.processes.items() if p["alive"]]
         mod.current_session = lambda: 1
         mod.is_admin = lambda: system.admin
+        mod.protected_folders = lambda: list(system.protected)
+        mod.elevation_targets = lambda: list(system.elevation)
+        mod.relaunch_as_admin = lambda: system.calls.append(("relaunch_as_admin",)) or True
         mod.start_explorer = system.start_explorer
         mod.console_window = lambda: system.console
         mod.top_level_windows = top_level_windows

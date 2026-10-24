@@ -212,6 +212,29 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class LogTitleTests(unittest.TestCase):
+    def setUp(self):
+        make_system()
+        self.addCleanup(setattr, core, "log_titles", core.log_titles)
+        self.windows = core.list_windows(frozenset({ME}))
+
+    def logged(self):
+        targets = core.group_targets(core.filter_by_title(self.windows, "notepad"))
+        with self.assertLogs(core.log, "INFO") as logs:
+            core.close_processes(targets, 5, force=False, sleep=lambda s: None, clock=FakeClock())
+        return logs.output[0]
+
+    def test_titles_stay_out_of_the_log_by_default(self):
+        core.log_titles = False
+        line = self.logged()
+        self.assertIn("windows=2 titles=[]", line)
+        self.assertNotIn("notes.txt", line)
+
+    def test_titles_logged_when_allowed(self):
+        core.log_titles = True
+        self.assertRegex(self.logged(), r"windows=2 titles=\[.*notes\.txt.*\]")
+
+
 class ExplorerWindowTests(unittest.TestCase):
     def setUp(self):
         self.system = make_system()

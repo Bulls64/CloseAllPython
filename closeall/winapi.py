@@ -355,16 +355,37 @@ def is_admin():
         return False
 
 
+CSIDL_PROGRAM_FILES, CSIDL_PROGRAM_FILESX86 = 0x26, 0x2A
+
+
+def protected_folders():
+    """Folders a standard user cannot change: Windows and both Program Files."""
+    folders = [windows_directory()]
+    for csidl in (CSIDL_PROGRAM_FILES, CSIDL_PROGRAM_FILESX86):
+        buffer = ctypes.create_unicode_buffer(260)
+        if shell32.SHGetFolderPathW(None, csidl, None, 0, buffer) == 0 and buffer.value:
+            folders.append(buffer.value)
+    return folders
+
+
+def _relaunch_command():
+    if getattr(sys, "frozen", False):
+        return sys.executable, None
+    executable = sys.executable
+    windowed = os.path.join(os.path.dirname(executable), "pythonw.exe")
+    return (windowed if os.path.exists(windowed) else executable), os.path.abspath(sys.argv[0])
+
+
+def elevation_targets():
+    """The files relaunch_as_admin runs with administrator rights (program, and script from source)."""
+    executable, script = _relaunch_command()
+    return [executable] + ([script] if script else [])
+
+
 def relaunch_as_admin():
     """Start this program again with a UAC prompt. Return True if Windows accepted the request."""
-    if getattr(sys, "frozen", False):
-        executable, params = sys.executable, ""
-    else:
-        executable = sys.executable
-        windowed = os.path.join(os.path.dirname(executable), "pythonw.exe")
-        if os.path.exists(windowed):
-            executable = windowed
-        params = subprocess.list2cmdline([os.path.abspath(sys.argv[0])])
+    executable, script = _relaunch_command()
+    params = subprocess.list2cmdline([script]) if script else ""
     result = shell32.ShellExecuteW(None, "runas", executable, params, None, 1)
     return (result or 0) > 32
 

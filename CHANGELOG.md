@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.9.5 (2026-10-24)
+
+Fixes for the defects left open by the review
+- Updates: when GitHub's limit of 60 checks an hour per network address is reached (an office sharing one address), the message says so and when to try again, instead of "GitHub cannot be reached". Other GitHub errors give their code.
+- Log: window titles (names of documents, web pages, conversations) are no longer written to the log by default; each line gives the program and its number of windows. *Window titles in the log* in Settings › About turns them back on. Earlier log lines still display as before.
+- Restart as administrator: when CloseAllPython runs from a folder you can change without administrator rights (Downloads, Desktop), a message first explains the risk and suggests `C:\Program Files\CloseAllPython`; *Restart anyway* goes on. From Program Files, nothing changes.
+- Settings: long hints next to a switch wrap instead of being cut off.
+- Release notes cover every version since the previous release, so a version that never had its own release (1.8.0, 1.9.3) is no longer missing. A manual run of the workflow with a tag rewrites the notes of an existing release.
+- GitHub Actions: an interface test opens the real window on every page (lists, Background, Log, Settings › About, administrator warning) on the fake Windows of the tests; the self-test of the executables also reads the Windows and Program Files folders.
+- Repository: SECURITY.md (how to report a vulnerability privately, how downloads are checked), CONTRIBUTING.md and issue forms; README screenshots taken again from this version, with the Background screen.
+
 ## 1.9.4 (2026-10-21)
 
 - Settings › About: a *Project* line with the address of the GitHub project (github.com/Bulls64/CloseAllPython); click it to open the page in your browser. The version was already shown there.
@@ -142,6 +153,17 @@ Project
 ---
 
 # Journal des modifications (version française)
+
+## 1.9.5 (2026-10-24)
+
+Corrections des défauts restés ouverts après la revue
+- Mises à jour : quand la limite GitHub de 60 vérifications par heure et par adresse réseau est atteinte (bureau partageant une adresse), le message le dit et indique quand réessayer, au lieu de « GitHub est injoignable ». Les autres erreurs GitHub donnent leur code.
+- Journal : les titres des fenêtres (noms de documents, de pages web, de conversations) ne sont plus écrits par défaut ; chaque ligne donne le programme et son nombre de fenêtres. *Titres des fenêtres dans le journal*, dans Paramètres › À propos, les réactive. Les anciennes lignes s'affichent comme avant.
+- Redémarrer en administrateur : quand CloseAllPython tourne depuis un dossier modifiable sans droits administrateur (Téléchargements, Bureau), un message explique d'abord le risque et propose `C:\Program Files\CloseAllPython` ; *Redémarrer quand même* continue. Depuis Program Files, rien ne change.
+- Paramètres : les longues explications à côté d'un interrupteur passent à la ligne au lieu d'être coupées.
+- Les notes de release couvrent toutes les versions depuis la release précédente : une version sans release propre (1.8.0, 1.9.3) n'est plus oubliée. Un lancement manuel du workflow avec un tag réécrit les notes d'une release existante.
+- GitHub Actions : un test de l'interface ouvre la vraie fenêtre sur chaque page (listes, Arrière-plan, Journal, Paramètres › À propos, avertissement administrateur) avec le faux Windows des tests ; l'auto-test des exécutables lit aussi les dossiers Windows et Program Files.
+- Dépôt : SECURITY.md (signaler une faille en privé, vérifier un téléchargement), CONTRIBUTING.md et formulaires de tickets ; captures du README refaites sur cette version, avec l'écran Arrière-plan.
 
 ## 1.9.4 (2026-10-21)
 

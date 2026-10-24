@@ -56,16 +56,20 @@ CloseAllPython lists the windows you see in Alt+Tab and closes the applications 
 | --- | --- |
 | <img src="docs/screenshots/closing-dark.png" alt="Closing screen: two applications closed, two still running"> | <img src="docs/screenshots/settings-dark.png" alt="Settings screen"> |
 
+| Background processes by memory | |
+| --- | --- |
+| <img src="docs/screenshots/background-dark.png" alt="Background screen: the windowless processes using the most memory"> | |
+
 ### Download
 
 Get `CloseAllPython.exe` (graphical application) and `CloseAllPython-CLI.exe` (command line) from the [Releases](../../releases) page. No installation: run the executable. Windows 10 or 11 is required.
 
 The executables are built by GitHub Actions from the tagged source code ([workflow](.github/workflows/build.yml)), so each release matches the code of its version.
 
-To close applications that run as administrator, use **Administrator mode** in the application.
+To close applications that run as administrator, use **Administrator mode** in the application. For regular use in that mode, put CloseAllPython in `C:\Program Files\CloseAllPython`: from a folder you can change without administrator rights (Downloads, Desktop), another program could replace it before it gets those rights, so the application warns you first.
 
 > [!NOTE]
-> **Windows warning on first launch.** The executables are not code-signed, so Windows SmartScreen ("Windows protected your PC") or your antivirus may flag them. This is common for unsigned programs built with PyInstaller. If you prefer not to trust the binaries, [build them yourself](#build-from-source) from the source code, which is entirely in this repository. To run anyway: click **More info**, then **Run anyway**. If a file is quarantined by your antivirus, restore it and add an exclusion for it.
+> **Windows warning on first launch.** The executables are not code-signed, so Windows SmartScreen ("Windows protected your PC") or your antivirus may flag them. This is common for unsigned programs built with PyInstaller. If you prefer not to trust the binaries, [build them yourself](#build-from-source) from the source code, which is entirely in this repository. To run anyway: click **More info**, then **Run anyway**. If a file is quarantined by your antivirus, restore it and add an exclusion for it. To check a download, compare `Get-FileHash CloseAllPython.exe` (PowerShell) with the SHA-256 shown next to the file on the release page.
 
 ### Usage
 
@@ -75,7 +79,7 @@ To close applications that run as administrator, use **Administrator mode** in t
 
 Closing an application closes all of its windows. The **Log** screen shows the latest actions; **Settings** are saved automatically.
 
-**About.** **Settings › About** shows the version, your rights, the log file and the address of the GitHub project (click it to open it).
+**About.** **Settings › About** shows the version, your rights, the log file and the address of the GitHub project (click it to open it). The log records each program closed and its number of windows; *Window titles in the log* (off by default) also records the titles, which can name your documents and pages.
 
 **Updates.** In **Settings › About**, *Check for updates* compares your version with the latest GitHub release and offers to install it; the application then restarts on the new version. With *Update automatically at startup* (off by default), the check runs each time the application opens and a new version is installed in the background, used from the next start or right away if you choose to restart. The application contacts GitHub only for these checks. If it sits in a folder you cannot write to (such as `Program Files`), download the new version from the release page instead.
 
@@ -154,6 +158,10 @@ tests/                 unit tests (winapi replaced by an in-memory fake: they ru
 
 See the [changelog](CHANGELOG.md) for the history of the project.
 
+### Contributing and security
+
+How to report a bug or work on the code: [CONTRIBUTING.md](CONTRIBUTING.md). A security problem is reported privately: [SECURITY.md](SECURITY.md).
+
 ### License
 
 CloseAllPython is released under the [MIT License](LICENSE): you may use, copy, modify and redistribute it freely, provided the copyright notice and the license text are kept. The software is provided without any warranty.
@@ -201,10 +209,10 @@ Récupérez `CloseAllPython.exe` (application graphique) et `CloseAllPython-CLI.
 
 Les exécutables sont compilés par GitHub Actions à partir du code source taggé ([workflow](.github/workflows/build.yml)) : chaque release correspond exactement au code de sa version.
 
-Pour fermer des applications lancées en administrateur, utilisez **Mode administrateur** dans l'application.
+Pour fermer des applications lancées en administrateur, utilisez **Mode administrateur** dans l'application. Pour un usage régulier dans ce mode, placez CloseAllPython dans `C:\Program Files\CloseAllPython` : depuis un dossier que vous pouvez modifier sans droits administrateur (Téléchargements, Bureau), un autre programme pourrait le remplacer avant qu'il obtienne ces droits ; l'application vous prévient donc d'abord.
 
 > [!NOTE]
-> **Avertissement de Windows au premier lancement.** Les exécutables ne sont pas signés numériquement : Windows SmartScreen (« Windows a protégé votre ordinateur ») ou votre antivirus peut donc les signaler. C'est courant pour les programmes non signés créés avec PyInstaller. Si vous préférez ne pas faire confiance aux binaires, [compilez-les vous-même](#compiler-depuis-les-sources) à partir du code source, entièrement disponible dans ce dépôt. Pour lancer malgré tout : cliquez sur **Informations complémentaires**, puis sur **Exécuter quand même**. Si un fichier est mis en quarantaine par votre antivirus, restaurez-le et ajoutez une exclusion.
+> **Avertissement de Windows au premier lancement.** Les exécutables ne sont pas signés numériquement : Windows SmartScreen (« Windows a protégé votre ordinateur ») ou votre antivirus peut donc les signaler. C'est courant pour les programmes non signés créés avec PyInstaller. Si vous préférez ne pas faire confiance aux binaires, [compilez-les vous-même](#compiler-depuis-les-sources) à partir du code source, entièrement disponible dans ce dépôt. Pour lancer malgré tout : cliquez sur **Informations complémentaires**, puis sur **Exécuter quand même**. Si un fichier est mis en quarantaine par votre antivirus, restaurez-le et ajoutez une exclusion. Pour vérifier un téléchargement, comparez `Get-FileHash CloseAllPython.exe` (PowerShell) avec l'empreinte SHA-256 affichée à côté du fichier sur la page de la release.
 
 ### Utilisation
 
@@ -214,7 +222,7 @@ Pour fermer des applications lancées en administrateur, utilisez **Mode adminis
 
 Fermer une application ferme toutes ses fenêtres. L'écran **Journal** affiche les dernières actions ; les **Paramètres** sont enregistrés automatiquement.
 
-**À propos.** **Paramètres › À propos** affiche la version, vos droits, le fichier journal et l'adresse du projet GitHub (un clic l'ouvre).
+**À propos.** **Paramètres › À propos** affiche la version, vos droits, le fichier journal et l'adresse du projet GitHub (un clic l'ouvre). Le journal note chaque programme fermé et son nombre de fenêtres ; *Titres des fenêtres dans le journal* (désactivé par défaut) note aussi les titres, qui peuvent nommer vos documents et pages.
 
 **Mises à jour.** Dans **Paramètres › À propos**, *Rechercher des mises à jour* compare votre version avec la dernière release GitHub et propose de l'installer ; l'application redémarre alors sur la nouvelle version. Avec *Mettre à jour automatiquement au démarrage* (désactivé par défaut), la vérification a lieu à chaque ouverture et une nouvelle version s'installe en arrière-plan, utilisée au démarrage suivant ou tout de suite si vous choisissez de redémarrer. L'application ne contacte GitHub que pour ces vérifications. Si elle se trouve dans un dossier où vous ne pouvez pas écrire (comme `Program Files`), téléchargez la nouvelle version sur la page de la release.
 
@@ -292,6 +300,10 @@ tests/                 tests unitaires (winapi remplacé par une simulation en m
 ```
 
 L'historique du projet se trouve dans le [journal des modifications](CHANGELOG.md).
+
+### Contribuer et sécurité
+
+Signaler un bug ou travailler sur le code : [CONTRIBUTING.md](CONTRIBUTING.md). Un problème de sécurité se signale en privé : [SECURITY.md](SECURITY.md).
 
 ### Licence
 

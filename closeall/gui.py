@@ -907,7 +907,7 @@ class ClosingPage(ctk.CTkFrame):
     def leave_open(self, target):
         self.left_open.add(target.key)
         self.rows[target.key].set_left_open()
-        log.info("left_open pid=%s exe=%s titles=%r", target.pid, target.exe_path, target.titles)
+        core.log_target("left_open", target)
         self._update()
 
     def force(self):
@@ -929,19 +929,21 @@ class ClosingPage(ctk.CTkFrame):
 # ====================================================================== log
 
 LOG_LINE = re.compile(r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)(?:,\d+)? \w+ (closed|forced|still_running|failed|protected|left_open) "
-                      r"pid=(\d+) exe=(.*?) titles=(\[.*?\])(?: error=(\S+)(?: (.*))?)?$")
+                      r"pid=(\d+) exe=(.*?)(?: windows=(\d+))? titles=(\[.*?\])(?: error=(\S+)(?: (.*))?)?$")
 
 
 def format_log_line(app, line):
     match = LOG_LINE.match(line.rstrip("\n"))
     if not match:
         return line.rstrip("\n")
-    when, status, pid, exe, titles, error_key, detail = match.groups()
+    when, status, pid, exe, windows, titles, error_key, detail = match.groups()
     name = app.display_name(exe) if exe and exe != "None" else app.t("process_n", pid=pid)
     try:
         titles = "; ".join(ast.literal_eval(titles))
     except (ValueError, SyntaxError):
         pass
+    if not titles and windows:   # titles kept out of the log: say how many windows instead
+        titles = app.tn("n_windows", int(windows))
     status_text = app.t("status_left") if status == "left_open" else app.t(f"log_{status}")
     text = f"{when}   {status_text:<18} {name} ({pid})   {shorten(titles, 90)}"
     if error_key:
@@ -1160,8 +1162,9 @@ class SettingsPage(ctk.CTkFrame):
         ghost_button(buttons, app, t("open_log"), lambda: app.show("log")).pack(side="left")
         if not app.is_admin:
             ghost_button(buttons, app, t("admin_restart"), app.restart_as_admin).pack(side="left", padx=(8, 0))
+        self._switch(about, "log_window_titles", t("log_window_titles"), t("log_window_titles_hint"))
         updates = ctk.CTkFrame(about, fg_color="transparent")
-        updates.pack(fill="x", pady=(16, 0))
+        updates.pack(fill="x", pady=(10, 0))
         self._switch(updates, "auto_update", t("auto_update"), t("auto_update_hint"))
         line = ctk.CTkFrame(updates, fg_color="transparent")
         line.pack(fill="x", pady=(8, 0))
@@ -1249,8 +1252,15 @@ class SettingsPage(ctk.CTkFrame):
         texts.pack(side="left", fill="x", expand=True)
         title_label = label(texts, title, self.app.fonts.body)
         title_label.pack(fill="x")
-        hint_label = label(texts, hint, self.app.fonts.small, "muted")
+        hint_label = label(texts, hint, self.app.fonts.small, "muted", wraplength=320)
         hint_label.pack(fill="x")
+
+        def wrap(event):
+            # Long hints wrap to the column instead of being cut under the switch.
+            scaling = getattr(hint_label, "_get_widget_scaling", lambda: 1)() or 1
+            hint_label.configure(wraplength=max(120, int(event.width / scaling) - 4))
+
+        texts.bind("<Configure>", wrap, add="+")
         for widget in (texts, title_label, hint_label):
             widget.bind("<Button-1>", lambda _e: toggle.toggle())
 
@@ -1419,6 +1429,7 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__(fg_color=C["bg"])
         self.settings = settings_mod.load_settings()
+        core.log_titles = self.settings["log_window_titles"]
         ctk.set_appearance_mode(self.settings["theme"])
         self.is_admin = winapi.is_admin()
         self.own_pids = core.own_pids(include_ancestors=False)
@@ -1624,6 +1635,7 @@ class App(ctk.CTk):
             Dialog(self, self.t("error"), self.t("save_error", detail=exc))
             return
         old, self.settings = self.settings, new
+        core.log_titles = new["log_window_titles"]
         if new["theme"] != old["theme"]:
             ctk.set_appearance_mode(new["theme"])
         if new["language"] != old["language"]:
@@ -1636,6 +1648,16 @@ class App(ctk.CTk):
             self.list_page.update_counts()
 
     def restart_as_admin(self):
+        unprotected = core.unprotected_elevation_files()
+        if not unprotected:
+            self._relaunch_as_admin()
+            return
+        Dialog(self, self.t("admin_unsafe_title"),
+               self.t("admin_unsafe_message", folder=ntpath.dirname(unprotected[0])),
+               confirm_text=self.t("admin_restart_anyway"), on_confirm=self._relaunch_as_admin,
+               cancel_text=self.t("cancel"))
+
+    def _relaunch_as_admin(self):
         if winapi.relaunch_as_admin():
             self.destroy()
         else:

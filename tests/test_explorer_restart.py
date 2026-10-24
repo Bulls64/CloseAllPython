@@ -1,3 +1,4 @@
+import sys
 import unittest
 
 from tests import fakewin  # installs the fake winapi before closeall.core is imported
@@ -92,3 +93,35 @@ class ElevatedRestartTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ElevationFolderTests(unittest.TestCase):
+    def setUp(self):
+        self.system = fakewin.install(fakewin.FakeSystem())
+
+    def test_program_files_is_safe(self):
+        self.assertEqual(core.unprotected_elevation_files(), [])
+        self.system.elevation = [r"c:\program files (x86)\CloseAllPython\CloseAllPython.exe"]
+        self.assertEqual(core.unprotected_elevation_files(), [])
+
+    def test_user_folders_are_reported(self):
+        exe = r"C:\Users\me\Downloads\CloseAllPython.exe"
+        self.system.elevation = [exe]
+        self.assertEqual(core.unprotected_elevation_files(), [exe])
+        # a look-alike name next to Program Files is not inside it, and ".." does not climb into it
+        for path in (r"C:\Program Files Evil\CloseAllPython.exe",
+                     r"C:\Program Files\..\Users\me\CloseAllPython.exe"):
+            self.system.elevation = [path]
+            self.assertEqual(core.unprotected_elevation_files(), [path], path)
+
+    def test_from_source_both_files_are_checked(self):
+        script = r"C:\Users\me\code\closeallpython.py"
+        self.system.elevation = [r"C:\Program Files\Python314\pythonw.exe", script]
+        self.assertEqual(core.unprotected_elevation_files(), [script])
+
+    def test_unreadable_folders(self):
+        def broken():
+            raise OSError(5, "denied")
+
+        sys.modules["closeall.winapi"].protected_folders = broken
+        self.assertEqual(core.unprotected_elevation_files(), self.system.elevation)   # warn rather than trust

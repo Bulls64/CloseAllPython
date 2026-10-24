@@ -14,6 +14,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -115,13 +116,34 @@ def _request(url, accept):
     return urllib.request.Request(url, headers={"Accept": accept, "User-Agent": f"CloseAllPython/{__version__}"})
 
 
+def _connection_error(exc, clock=time.time):
+    """The UpdateError for a failed request: GitHub's request limit and HTTP errors are named."""
+    if isinstance(exc, urllib.error.HTTPError):
+        headers = exc.headers or {}
+        if exc.code == 429 or (exc.code == 403 and headers.get("X-RateLimit-Remaining") == "0"):
+            # Without a token GitHub allows 60 API requests an hour per IP address: an office
+            # sharing one address can use them up. Say when it resets instead of "unreachable".
+            try:
+                if headers.get("X-RateLimit-Reset"):
+                    reset = float(headers["X-RateLimit-Reset"])
+                else:
+                    reset = clock() + float(headers.get("Retry-After"))
+            except (TypeError, ValueError):
+                reset = None
+            if reset and reset > clock():
+                return UpdateError("update_err_rate_limit", time=time.strftime("%H:%M", time.localtime(reset)))
+            return UpdateError("update_err_rate_limit_soon")
+        return UpdateError("update_err_http", code=exc.code)
+    return UpdateError("update_err_network", detail=getattr(exc, "reason", exc))
+
+
 def fetch_latest(opener=urllib.request.urlopen):
     """The latest published release (GitHub's /latest skips drafts and pre-releases)."""
     try:
         with opener(_request(LATEST_API, "application/vnd.github+json"), timeout=API_TIMEOUT) as response:
             data = json.loads(response.read(2_000_000).decode("utf-8"))
     except (urllib.error.URLError, OSError) as exc:
-        raise UpdateError("update_err_network", detail=getattr(exc, "reason", exc)) from exc
+        raise _connection_error(exc) from exc
     except ValueError as exc:
         raise UpdateError("update_err_response") from exc
     try:
@@ -196,7 +218,7 @@ def download(asset, destination, opener=urllib.request.urlopen, progress=None):
         raise UpdateError("update_err_write", detail=exc.strerror or exc) from exc
     except (urllib.error.URLError, OSError) as exc:
         _remove(part)
-        raise UpdateError("update_err_network", detail=getattr(exc, "reason", exc)) from exc
+        raise _connection_error(exc) from exc
     if done != asset.size or digest.hexdigest() != asset.sha256:
         _remove(part)
         raise UpdateError("update_err_verify")
