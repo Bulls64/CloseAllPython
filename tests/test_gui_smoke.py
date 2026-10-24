@@ -1,7 +1,7 @@
 """Smoke test of the interface: the real window, every page, on the fake Windows of the tests.
 
-Skipped where Tk cannot open a window (no display) or CustomTkinter is not installed. On the
-GitHub Windows runner it runs with the other tests.
+Skipped where Tk cannot open a window (no display) or CustomTkinter is not installed, except on
+GitHub Actions: there it must run, so a runner without a display fails instead of skipping.
 """
 import os
 import shutil
@@ -23,7 +23,7 @@ except Exception:   # no CustomTkinter, or no display to open a window on
     DISPLAY = False
 
 
-@unittest.skipUnless(DISPLAY, "needs CustomTkinter and a display")
+@unittest.skipUnless(DISPLAY or os.environ.get("GITHUB_ACTIONS") == "true", "needs CustomTkinter and a display")
 class InterfaceSmokeTests(unittest.TestCase):
     def setUp(self):
         self.data = tempfile.mkdtemp()
