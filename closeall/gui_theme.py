@@ -283,7 +283,7 @@ QPushButton[kind="subtle"]:disabled {{ background: transparent; color: {t['text_
 QPushButton[kind="icon"] {{ padding: 0; min-height: 30px; max-height: 30px; min-width: 30px; max-width: 30px; }}
 QPushButton[kind="link"] {{ background: transparent; border: none; color: {t['link']}; padding: 4px 6px; }}
 QPushButton[kind="link"]:hover {{ background: {t['subtle_hover']}; }}
-QPushButton[dropdown="true"] {{ padding-right: 30px; }}
+QPushButton[dropdown="true"] {{ padding-right: 34px; }}
 QPushButton::menu-indicator {{ image: none; width: 0; }}
 
 QLineEdit {{ background: {t['input']}; border: 1px solid {t['control_stroke']};

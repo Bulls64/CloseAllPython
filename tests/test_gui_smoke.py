@@ -189,6 +189,18 @@ class InterfaceSmokeTests(unittest.TestCase):
         self.assertEqual(self.gui.THEME["window"], "#202020")
         self.assertNotIn(("set_backdrop", True), self.system.calls)
 
+    def test_navigation_pane_folds_in_narrow_windows(self):
+        self.app.resize(900, 700)
+        self.pump(0.1)
+        self.assertTrue(self.app.nav_compact)
+        self.app.resize(1200, 700)
+        self.pump(0.1)
+        self.assertFalse(self.app.nav_compact)
+        self.app.toggle_nav()   # the user's choice wins over the width
+        self.app.resize(1300, 700)
+        self.pump(0.1)
+        self.assertTrue(self.app.nav_compact)
+
     def test_worker_threads_hand_back_to_the_interface(self):
         import threading
 

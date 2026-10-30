@@ -20,7 +20,7 @@ from PySide6.QtCore import (QEvent, QLibraryInfo, QObject, QRectF, QSize, Qt, QT
                             Signal)
 from PySide6.QtGui import (QColor, QFont, QFontDatabase, QFontMetrics, QGuiApplication, QIcon, QImage, QKeySequence,
                            QPainter, QPen, QPixmap, QShortcut)
-from PySide6.QtWidgets import (QAbstractButton, QApplication, QButtonGroup, QCheckBox, QComboBox, QFrame,
+from PySide6.QtWidgets import (QAbstractButton, QApplication, QBoxLayout, QButtonGroup, QCheckBox, QComboBox, QFrame,
                                QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMenu,
                                QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QSlider,
                                QStackedWidget, QVBoxLayout, QWidget)
@@ -46,6 +46,7 @@ EXPLORER_REFRESH_MS = (700, 2000)
 RETRY_REFRESH_MS = 150
 UPDATE_STARTUP_DELAY_MS = 2000   # the automatic check waits until the window is up
 NAV_WIDTH, NAV_COMPACT_WIDTH = 248, 48
+NAV_AUTO_COMPACT = 920            # narrower windows show the navigation pane as icons only
 PAD = 36                          # page margins
 
 THEME = Theme(dark=False, mica=False)
@@ -137,8 +138,15 @@ def glyph_label(name, size=16, tone=None):
     return widget
 
 
+class IconTextButton(QPushButton):
+    """A button with a glyph before its text, kept apart from it as in WinUI."""
+
+    def setText(self, text):
+        super().setText(f" {text}" if text else text)
+
+
 def button(text, on_click=None, kind="standard", icon=None):
-    widget = QPushButton(text)
+    widget = IconTextButton(text) if icon and text else QPushButton(text)
     widget.setProperty("kind", kind)
     if icon:
         set_glyph(widget, icon, "on_accent" if kind == "accent" else "text")
@@ -323,7 +331,7 @@ class DropDownButton(QPushButton, Painted):
         painter = QPainter(self)
         painter.setPen(qcolor("text2" if self.isEnabled() else "text_disabled"))
         painter.setFont(glyph_font(10))
-        painter.drawText(QRectF(self.width() - 26, 0, 16, self.height()), Qt.AlignmentFlag.AlignCenter,
+        painter.drawText(QRectF(self.width() - 28, 0, 16, self.height()), Qt.AlignmentFlag.AlignCenter,
                          THEME.glyph("chevron_down"))
         painter.end()
 
@@ -457,7 +465,7 @@ def settings_card(glyph, title, description=None, control=None, parent_layout=No
     if glyph:
         layout.addWidget(glyph_label(glyph, 20))
     texts = vbox(spacing=0)
-    texts.addWidget(label(title))
+    texts.addWidget(label(title, wrap=True))
     box.description = None
     if description:
         box.description = label(description, "caption", "secondary", wrap=True)
@@ -506,6 +514,40 @@ def page_header(title):
     actions = hbox(spacing=8)
     row.addLayout(actions)
     return row, texts, actions
+
+
+class CommandBar(QFrame):
+    """The bar under a list: a status text on the left, the buttons on the right. When the
+    buttons leave too little room for the text, they go on a second row."""
+
+    TEXT_MIN = 300
+
+    def __init__(self):
+        super().__init__()
+        self.setProperty("bar", "true")
+        self.box = QBoxLayout(QBoxLayout.Direction.LeftToRight)
+        self.box.setContentsMargins(PAD, 14, PAD, 16)
+        self.box.setSpacing(12)
+        self.setLayout(self.box)
+        self.texts = vbox(spacing=2)
+        self.box.addLayout(self.texts, 1)
+        self.buttons = QWidget()
+        self.buttons_row = hbox(spacing=8)
+        self.buttons_row.addStretch(1)
+        self.buttons.setLayout(self.buttons_row)
+        self.box.addWidget(self.buttons, 0, Qt.AlignmentFlag.AlignVCenter)
+
+    def add_buttons(self, *widgets):
+        for widget in widgets:
+            self.buttons_row.addWidget(widget)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        room = self.width() - 2 * PAD - self.buttons.sizeHint().width() - 12
+        direction = (QBoxLayout.Direction.LeftToRight if room >= self.TEXT_MIN
+                     else QBoxLayout.Direction.TopToBottom)
+        if self.box.direction() != direction:
+            self.box.setDirection(direction)
 
 
 class Dialog(QWidget):
@@ -766,11 +808,8 @@ class ListPage(Page):
         header_row.addWidget(glyph_label("lock", 12, "secondary"))
         header_row.addWidget(label(t("protected_header"), "strong", "secondary"), 1)
 
-        bar = QFrame()
-        bar.setProperty("bar", "true")
-        bar_layout = hbox((PAD, 14, PAD, 16), 8)
-        bar.setLayout(bar_layout)
-        texts = vbox(spacing=2)
+        bar = CommandBar()
+        texts = bar.texts
         self.selection_line = label("", "strong", wrap=True)
         texts.addWidget(self.selection_line)
         hint = hbox(spacing=6)
@@ -779,17 +818,14 @@ class ListPage(Page):
         self.hint = label("", "caption", "secondary", wrap=True)
         hint.addWidget(self.hint, 1)
         texts.addLayout(hint)
-        bar_layout.addLayout(texts, 1)
         self.explorer_menu = flyout_menu(self)
         self.close_explorer_action = self.explorer_menu.addAction(t("close_explorer_short"), self.close_explorer)
         self.restart_explorer_action = self.explorer_menu.addAction(t("restart_explorer_short"),
                                                                     self.restart_explorer)
         self.explorer_button = DropDownButton(t("explorer_group"), "folder", self.explorer_menu)
-        bar_layout.addWidget(self.explorer_button, 0, Qt.AlignmentFlag.AlignVCenter)
         self.clear_button = button(t("clear_selection"), self.clear_selection)
-        bar_layout.addWidget(self.clear_button, 0, Qt.AlignmentFlag.AlignVCenter)
         self.close_button = button("", self.close_selected, "accent")
-        bar_layout.addWidget(self.close_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        bar.add_buttons(self.explorer_button, self.clear_button, self.close_button)
         layout.addWidget(bar)
 
     def eventFilter(self, watched, event):
@@ -1180,19 +1216,13 @@ class ClosingPage(Page):
         self.list_layout.setSpacing(4)
         self.list_layout.addStretch(1)
         layout.addWidget(area, 1)
-        bar = QFrame()
-        bar.setProperty("bar", "true")
-        bar_layout = hbox((PAD, 14, PAD, 16), 8)
-        bar.setLayout(bar_layout)
-        texts = vbox(spacing=2)
+        bar = CommandBar()
         self.summary = label("", "strong", wrap=True)
-        texts.addWidget(self.summary)
-        texts.addWidget(label(t("closing_hint"), "caption", "secondary", wrap=True))
-        bar_layout.addLayout(texts, 1)
+        bar.texts.addWidget(self.summary)
+        bar.texts.addWidget(label(t("closing_hint"), "caption", "secondary", wrap=True))
         self.done_button = button(t("done"), self.finish)
-        bar_layout.addWidget(self.done_button, 0, Qt.AlignmentFlag.AlignVCenter)
         self.force_button = button("", self.force, "accent", icon="power")
-        bar_layout.addWidget(self.force_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        bar.add_buttons(self.done_button, self.force_button)
         layout.addWidget(bar)
 
     def start(self, targets, timeout):
@@ -1617,7 +1647,7 @@ class SettingsPage(Page):
         about_layout.addWidget(divider())
         row = hbox((64, 10, 16, 10), 12)
         texts = vbox()
-        texts.addWidget(label(title))
+        texts.addWidget(label(title, wrap=True))
         if description:
             texts.addWidget(label(description, "caption", "secondary", wrap=True))
         row.addLayout(texts, 1)
@@ -1890,6 +1920,8 @@ class App(QMainWindow):
         self.busy = False
         self.current = "apps"
         self.nav_compact = False
+        self.nav_choice = None        # set by the ☰ button; otherwise the window's width decides
+        self.nav_pane = None
         self.dispatcher = Dispatcher()
         self.dispatcher.call.connect(self._run_call, Qt.ConnectionType.QueuedConnection)
         families = set(QFontDatabase.families())
@@ -2105,6 +2137,9 @@ class App(QMainWindow):
         super().resizeEvent(event)
         for dialog in self.findChildren(Dialog):
             dialog.setGeometry(self.rect())
+        # As WinUI's NavigationView: icons only when the window is narrow, unless the ☰ button decided.
+        if self.nav_choice is None and getattr(self, "nav_pane", None) is not None:
+            self.set_nav_compact(self.width() < NAV_AUTO_COMPACT)
 
     # ---------------------------------------------------------------- layout
     def build(self):
@@ -2163,7 +2198,13 @@ class App(QMainWindow):
             self.qapp.installTranslator(self.translator)
 
     def toggle_nav(self):
-        self.nav_compact = not self.nav_compact
+        self.nav_choice = not self.nav_compact
+        self.set_nav_compact(self.nav_choice)
+
+    def set_nav_compact(self, compact):
+        if compact == self.nav_compact:
+            return
+        self.nav_compact = compact
         self.nav_pane.setFixedWidth(NAV_COMPACT_WIDTH if self.nav_compact else NAV_WIDTH)
         for item in self.nav.values():
             item.set_compact(self.nav_compact)
