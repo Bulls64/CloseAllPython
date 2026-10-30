@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.0.0 (2026-10-30)
+
+New look in the Windows 11 Fluent (WinUI 3) style
+- Navigation pane on the left (Applications, Background, Log, Settings) that the ☰ button folds down to icons, and pages on a layer with a rounded corner, as in Windows 11 apps.
+- Windows 11 colours (light and dark), Segoe UI Variable type, Fluent icons, and WinUI controls: buttons, check boxes, toggle switches, drop-down lists, slider, progress bars.
+- Mica in the dark theme on Windows 11 22H2 and later: the window is tinted by the desktop wallpaper. *Settings › Display › Transparency effect (Mica)* turns it off. The light theme stays opaque: Tk draws without transparency, and dark text on Mica would vanish.
+- Applications: cards with the windows of each application under a chevron, a filter bar (All / Selected), and a command bar whose *File Explorer* menu holds *Close windows* and *Restart*.
+- Background: the *Include Windows processes* switch in a card, the explanation in an information bar, a *Protected* badge on Windows processes.
+- Settings: one column of cards, as in Windows Settings; language and theme in drop-down lists; *About* gathers the version, the GitHub link, your rights, the log and the updates.
+- Dialogs in the style of WinUI's ContentDialog.
+- Screenshots of the README taken on a real Windows by a new workflow (tools/screenshots.py).
+
 ## 1.9.5 (2026-10-24)
 
 Fixes for the defects left open by the review
@@ -153,6 +165,18 @@ Project
 ---
 
 # Journal des modifications (version française)
+
+## 2.0.0 (2026-10-30)
+
+Nouveau look dans le style Fluent de Windows 11 (WinUI 3)
+- Volet de navigation à gauche (Applications, Arrière-plan, Journal, Paramètres), que le bouton ☰ réduit aux icônes, et pages posées sur un calque au coin arrondi, comme dans les applications de Windows 11.
+- Couleurs de Windows 11 (clair et sombre), police Segoe UI Variable, icônes Fluent et contrôles WinUI : boutons, cases à cocher, interrupteurs, listes déroulantes, curseur, barres de progression.
+- Mica en thème sombre sous Windows 11 22H2 et plus récent : la fenêtre est teintée par le fond d'écran. *Paramètres › Affichage › Effet de transparence (Mica)* le désactive. Le thème clair reste opaque : Tk dessine sans transparence, et le texte foncé disparaîtrait sur Mica.
+- Applications : cartes avec les fenêtres de chaque application sous un chevron, barre de filtre (Toutes / Sélection), et barre de commandes dont le menu *Explorateur de fichiers* regroupe *Fermer les fenêtres* et *Redémarrer*.
+- Arrière-plan : l'interrupteur *Inclure les processus de Windows* dans une carte, l'explication dans une barre d'information, un badge *Protégé* sur les processus de Windows.
+- Paramètres : une colonne de cartes, comme les Paramètres de Windows ; langue et thème dans des listes déroulantes ; *À propos* regroupe la version, le lien GitHub, vos droits, le journal et les mises à jour.
+- Boîtes de dialogue dans le style du ContentDialog de WinUI.
+- Captures du README prises sur un vrai Windows par un nouveau workflow (tools/screenshots.py).
 
 ## 1.9.5 (2026-10-24)
 

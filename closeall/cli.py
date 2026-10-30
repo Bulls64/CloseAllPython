@@ -214,6 +214,13 @@ def self_test_checks():
         from . import winapi
         winapi.current_session()
 
+    def icons():
+        from . import gui_theme, winapi
+        glyphs = gui_theme.Glyphs(winapi.windows_directory())
+        if not glyphs.path:
+            raise RuntimeError("the Windows icon font (Segoe Fluent Icons / Segoe MDL2 Assets) was not found")
+        glyphs._draw(gui_theme.GLYPHS["apps"][0], 16, "#000000", glyphs.path)
+
     def folders():
         from . import winapi
         found = winapi.protected_folders()
@@ -226,7 +233,8 @@ def self_test_checks():
             raise RuntimeError("no desktop folder")
 
     return [("interface", gui), ("windows", windows), ("processes", processes), ("session", session),
-            ("folders", folders), ("shortcut", shortcut_com)]
+            ("folders", folders), ("icons", icons),
+            ("shortcut", shortcut_com)]
 
 
 def run_self_test(out=None, err=None, checks=None):

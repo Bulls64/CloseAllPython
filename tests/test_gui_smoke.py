@@ -88,7 +88,7 @@ class InterfaceSmokeTests(unittest.TestCase):
         self.app.show("settings")
         texts = self.labels(self.app.pages["settings"])
         self.assertIn("github.com/Bulls64/CloseAllPython", texts)
-        self.assertIn(self.gui.__version__, texts)
+        self.assertTrue(any(self.gui.__version__ in text for text in texts), texts)
 
     def test_log_lines_without_titles(self):
         self.pump()
@@ -115,6 +115,36 @@ class InterfaceSmokeTests(unittest.TestCase):
             self.app.restart_as_admin()
             self.assertIn(("relaunch_as_admin",), self.system.calls)
             destroy.assert_called_once()
+
+    def test_mica_backdrop_follows_the_theme_and_the_setting(self):
+        self.app.destroy()
+        self.system.mica = True
+        self.settings.save_settings({"language": "fr", "theme": "dark"})
+        self.app = self.gui.App()
+        self.pump(0.5)
+        self.assertTrue(self.app.mica)
+        self.assertEqual(self.gui.C["bg"][1], "#000000")   # dark colours converted for Mica
+        self.assertIn(("set_backdrop", True), self.system.calls)
+        self.system.calls.clear()
+        self.app.update_settings(theme="light")
+        self.pump(0.5)
+        self.assertIn(("set_backdrop", False), self.system.calls)   # light theme: opaque
+        self.app.update_settings(mica=False)
+        self.pump(0.5)
+        self.assertFalse(self.app.mica)
+        self.assertNotEqual(self.gui.C["bg"][1], "#000000")   # plain colours again
+        self.app.show("settings")
+        self.assertIn("Effet de transparence (Mica)", self.labels(self.app.pages["settings"]))
+
+    def test_mica_refused_falls_back_to_plain_colours(self):
+        self.app.destroy()
+        self.system.mica = True
+        self.settings.save_settings({"language": "fr", "theme": "dark"})
+        sys.modules["closeall.winapi"].set_backdrop = lambda hwnd, mica: False
+        self.app = self.gui.App()
+        self.pump(0.8)
+        self.assertFalse(self.app.mica)
+        self.assertNotEqual(self.gui.C["bg"][1], "#000000")
 
     def test_update_errors_are_readable(self):
         self.pump()

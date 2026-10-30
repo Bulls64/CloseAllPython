@@ -19,6 +19,7 @@ DEFAULT_SETTINGS = {
     "auto_update": False,
     "background_include_system": False,
     "log_window_titles": False,
+    "mica": True,
 }
 THEMES = ("system", "light", "dark")
 BOOL_KEYS = tuple(key for key, value in DEFAULT_SETTINGS.items() if isinstance(value, bool))

@@ -621,3 +621,40 @@ def set_window_icons(hwnd, big, small):
     old_big = user32.SendMessageW(hwnd, WM_SETICON, ICON_BIG, big or 0)
     old_small = user32.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, small or 0)
     return old_big, old_small
+
+
+# --------------------------------------------------------------------------- Mica backdrop
+
+DWMWA_SYSTEMBACKDROP_TYPE = 38    # Windows 11 22H2 (build 22621) and later
+DWMSBT_NONE, DWMSBT_MAINWINDOW = 1, 2
+MICA_MIN_BUILD = 22621
+
+
+class MARGINS(ctypes.Structure):
+    _fields_ = [("left", ctypes.c_int), ("right", ctypes.c_int), ("top", ctypes.c_int), ("bottom", ctypes.c_int)]
+
+
+def windows_build():
+    return sys.getwindowsversion().build
+
+
+def backdrop_supported():
+    """True when Windows can draw the Mica backdrop behind a window (Windows 11 22H2+)."""
+    return dwmapi is not None and windows_build() >= MICA_MIN_BUILD
+
+
+def set_backdrop(hwnd, mica):
+    """Show the Mica backdrop through the whole window (`mica`), or make it opaque again.
+
+    With Mica, the frame is extended into the whole client area so the compositor draws the
+    backdrop behind it; the window's black pixels then show the backdrop alone. Returns True
+    when Windows accepted both changes.
+    """
+    if dwmapi is None:
+        return False
+    value = ctypes.c_int(DWMSBT_MAINWINDOW if mica else DWMSBT_NONE)
+    result = dwmapi.DwmSetWindowAttribute(wintypes.HWND(hwnd), DWMWA_SYSTEMBACKDROP_TYPE, ctypes.byref(value),
+                                          ctypes.sizeof(value))
+    margins = MARGINS(-1, -1, -1, -1) if mica else MARGINS(0, 0, 0, 0)
+    extended = dwmapi.DwmExtendFrameIntoClientArea(wintypes.HWND(hwnd), ctypes.byref(margins))
+    return result == 0 and extended == 0

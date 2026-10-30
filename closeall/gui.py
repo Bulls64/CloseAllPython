@@ -1,4 +1,5 @@
-"""CustomTkinter user interface: application list, closing screen, log and settings."""
+"""CustomTkinter user interface in the Windows 11 Fluent style: navigation pane, application
+list, closing screen, background processes, log and settings."""
 import ast
 import logging
 import ntpath
@@ -14,8 +15,7 @@ from dataclasses import dataclass, field
 import customtkinter as ctk
 
 from . import __version__, appicon, core, crash, settings as settings_mod, shortcut, updater, winapi
-from .gui_theme import (ACCENT, ACCENT_HOVER, C, WARN_FILL, WARN_FILL_HOVER, WARN_ON, WHITE, Fonts,
-                        tile_color, tile_letter)
+from .gui_theme import C, Fonts, Glyphs, apply_palette, mica_image, tile_color, tile_letter
 from .i18n import LANGUAGE_NAMES, TEXT, format_memory, format_seconds, translate, translate_n
 
 log = logging.getLogger(settings_mod.LOGGER_NAME)
@@ -35,6 +35,13 @@ AFTER_CLOSE_REFRESH_MS = (0, 400, 1200, 3000)
 EXPLORER_REFRESH_MS = (700, 2000)
 RETRY_REFRESH_MS = 150
 UPDATE_STARTUP_DELAY_MS = 2000   # the automatic check waits until the window is up
+
+NAV_WIDTH, NAV_COMPACT_WIDTH = 248, 52
+# The content layer is larger than its area by OVERHANG on the right and at the bottom, so that
+# only its top-left corner shows rounded, as in WinUI's NavigationView.
+OVERHANG = 16
+PAD = 36                 # page margins
+PAD_RIGHT = PAD + OVERHANG
 
 
 def resource_path(name):
@@ -80,7 +87,14 @@ def shorten(text, limit=MAX_TITLE):
     return text if len(text) <= limit else text[:limit - 1] + "…"
 
 
-# ====================================================================== small building blocks
+def scaled(widget, value):
+    try:
+        return round(value * widget._get_widget_scaling())
+    except Exception:
+        return value
+
+
+# ====================================================================== Fluent controls
 
 def label(master, text="", font=None, color="text", **kwargs):
     kwargs.setdefault("anchor", "w")
@@ -88,64 +102,196 @@ def label(master, text="", font=None, color="text", **kwargs):
     return ctk.CTkLabel(master, text=text, font=font, text_color=C[color], **kwargs)
 
 
-def ghost_button(master, app, text, command, font=None, **kwargs):
-    kwargs.setdefault("height", 40)
-    return ctk.CTkButton(master, text=text, command=command, font=font or app.fonts.body, height=kwargs.pop("height"),
-                         corner_radius=8, border_width=1, border_color=C["border_strong"], fg_color="transparent",
-                         hover_color=C["hover"], text_color=C["text"], **kwargs)
+def wrapping(widget, minimum=120):
+    """Make a label wrap to the width its parent gives it (long translations, narrow windows)."""
+    parent = widget.master
+
+    def wrap(event):
+        width = max(minimum, int(event.width / (scaled(widget, 100) / 100 or 1)) - 4)
+        if widget.cget("wraplength") != width:
+            widget.configure(wraplength=width)
+
+    parent.bind("<Configure>", wrap, add="+")
+    return widget
 
 
-def primary_button(master, app, text, command, **kwargs):
-    return ctk.CTkButton(master, text=text, command=command, font=app.fonts.body_bold, height=44, corner_radius=8,
-                         fg_color=ACCENT, hover_color=ACCENT_HOVER, text_color=WHITE,
-                         text_color_disabled=("#eef2fb", "#9aa1ad"), **kwargs)
+BUTTON_STYLES = {
+    "standard": dict(fg="control", hover="control_hover", text="text", border="control_border", border_width=1),
+    "accent": dict(fg="accent", hover="accent_hover", text="on_accent", border="accent", border_width=0),
+    "subtle": dict(fg=None, hover="subtle_hover", text="text", border=None, border_width=0),
+}
 
 
-def icon_button(master, app, glyph, command, size=40, **kwargs):
-    return ctk.CTkButton(master, text=app.fonts.glyph(glyph), command=command, font=app.fonts.icon_small,
-                         width=size, height=size, corner_radius=8, fg_color="transparent", hover_color=C["hover"],
-                         text_color=C["muted"], **kwargs)
+def button(master, app, text, command, icon=None, style="standard", height=32, **kwargs):
+    """A WinUI Button: standard (neutral), accent (main action) or subtle (no background)."""
+    spec = BUTTON_STYLES[style]
+    image = app.glyphs.image(icon, 16, spec["text"]) if icon else None
+    widget = ctk.CTkButton(master, text=text, command=command, image=image, compound="left", height=height,
+                           corner_radius=4, border_width=spec["border_width"],
+                           border_color=C[spec["border"]] if spec["border"] else None,
+                           fg_color=C[spec["fg"]] if spec["fg"] else "transparent", hover_color=C[spec["hover"]],
+                           text_color=C[spec["text"]], text_color_disabled=C["text_disabled"],
+                           font=kwargs.pop("font", app.fonts.body), **kwargs)
+    widget.fluent_style = style
+    return widget
 
 
-def switch(master, variable, command, text="", font=None, **kwargs):
-    return ctk.CTkSwitch(master, text=text, variable=variable, command=command, font=font, text_color=C["text"],
-                         switch_width=40, switch_height=22, progress_color=ACCENT, button_color=WHITE,
-                         button_hover_color="#f0f2f5", fg_color=("#b8c0cc", "#4a505c"), **kwargs)
+def set_enabled(widget, enabled):
+    """Enable or disable a button with WinUI's disabled colours."""
+    style = getattr(widget, "fluent_style", "standard")
+    if style == "accent":
+        widget.configure(state="normal" if enabled else "disabled",
+                         fg_color=C["accent"] if enabled else C["accent_disabled"],
+                         text_color_disabled=C["on_accent_disabled"])
+    else:
+        widget.configure(state="normal" if enabled else "disabled")
 
 
-def scroll_area(master):
-    return ctk.CTkScrollableFrame(master, fg_color=C["bg"], corner_radius=0, scrollbar_button_color=C["scroll"],
-                                  scrollbar_button_hover_color=C["scroll_hover"])
+def icon_button(master, app, glyph, command, size=32, style="subtle", token="text", **kwargs):
+    spec = BUTTON_STYLES[style]
+    return ctk.CTkButton(master, text="", image=app.glyphs.image(glyph, 16, token), command=command, width=size,
+                         height=size, corner_radius=4, border_width=spec["border_width"],
+                         border_color=C[spec["border"]] if spec["border"] else None,
+                         fg_color=C[spec["fg"]] if spec["fg"] else "transparent", hover_color=C[spec["hover"]],
+                         **kwargs)
 
 
-def page_header(page, app, title, pady=(22, 14)):
-    """Title at the top of a page. Returns the header (buttons go on its right) and the block
-    under the title (for a subtitle)."""
-    header = ctk.CTkFrame(page, fg_color="transparent")
-    header.grid(row=0, column=0, sticky="ew", padx=28, pady=pady)
-    titles = ctk.CTkFrame(header, fg_color="transparent")
-    titles.pack(side="left", fill="x", expand=True)
-    label(titles, title, app.fonts.title).pack(fill="x")
-    return header, titles
+def glyph_label(master, app, glyph, size=16, token="text", **kwargs):
+    kwargs.setdefault("width", size)
+    return ctk.CTkLabel(master, text="", image=app.glyphs.image(glyph, size, token), **kwargs)
 
 
-def segmented(master, app, values, command, fill=False):
-    return ctk.CTkSegmentedButton(master, values=values, command=command, font=app.fonts.body, height=36,
-                                  corner_radius=8, border_width=3, fg_color=C["inset"], selected_color=C["seg_selected"],
-                                  selected_hover_color=C["seg_selected"], unselected_color=C["inset"],
-                                  unselected_hover_color=C["hover"], text_color=C["text"], dynamic_resizing=not fill)
+def checkbox(master, command):
+    return ctk.CTkCheckBox(master, text="", width=20, checkbox_width=20, checkbox_height=20, corner_radius=4,
+                           border_width=1, fg_color=C["accent"], hover_color=C["accent_hover"],
+                           border_color=C["control_strong"], checkmark_color=C["on_accent"], command=command)
+
+
+class Toggle(ctk.CTkSwitch):
+    """WinUI ToggleSwitch: outlined when off, accent with a contrasting knob when on."""
+
+    def __init__(self, master, variable, command):
+        self._user_command = command
+        super().__init__(master, text="", variable=variable, command=self._changed, width=44, switch_width=40,
+                         switch_height=20, border_width=1, button_length=0, progress_color=C["accent"])
+        self._style()
+
+    def _changed(self):
+        self._style()
+        if self._user_command:
+            self._user_command()
+
+    def _style(self):
+        on = bool(self.get())
+        self.configure(fg_color=C["control"], border_color=C["accent"] if on else C["control_strong"],
+                       button_color=C["on_accent"] if on else C["control_strong"],
+                       button_hover_color=C["on_accent"] if on else C["text2"])
+
+    def set_value(self, on):
+        self.select() if on else self.deselect()
+        self._style()
+
+
+def combo(master, app, values, command, width=200):
+    menu_text = ("#1a1a1a", "#ffffff")
+    return ctk.CTkOptionMenu(master, values=values, command=command, width=width, height=32, corner_radius=4,
+                             fg_color=C["control"], button_color=C["control"], button_hover_color=C["control_hover"],
+                             text_color=C["text"], font=app.fonts.body, dropdown_font=app.fonts.body,
+                             dropdown_fg_color=C["menu"], dropdown_hover_color=C["menu_hover"],
+                             dropdown_text_color=menu_text, dynamic_resizing=False)
+
+
+def progress_bar(master, width=160, height=4):
+    return ctk.CTkProgressBar(master, width=width, height=height, corner_radius=2, fg_color=C["track"],
+                              progress_color=C["accent"])
+
+
+def scroll_area(master, color="layer"):
+    area = ctk.CTkScrollableFrame(master, fg_color=C[color], corner_radius=0, scrollbar_button_color=C["text3"],
+                                  scrollbar_button_hover_color=C["text2"])
+    try:   # thin like WinUI's scrollbars (private attribute: cosmetic only)
+        area._scrollbar.configure(width=10)
+    except Exception:
+        pass
+    return area
+
+
+def card(master, color="card", border="card_border", **kwargs):
+    return ctk.CTkFrame(master, fg_color=C[color], border_color=C[border], border_width=1, corner_radius=4, **kwargs)
+
+
+class Divider(tk.Frame):
+    """A 1 px line (CustomTkinter frames draw nothing under 2 px), recoloured with the theme."""
+
+    def __init__(self, master, token="divider"):
+        super().__init__(master, height=1, bd=0, highlightthickness=0)
+        self.colors = C[token]
+        ctk.AppearanceModeTracker.add(self._set_mode, self)
+        self._set_mode(ctk.get_appearance_mode())
+
+    def _set_mode(self, mode):
+        self.configure(bg=self.colors[1 if str(mode).lower() == "dark" else 0])
+
+    def destroy(self):
+        try:
+            ctk.AppearanceModeTracker.remove(self._set_mode)
+        except Exception:
+            pass
+        super().destroy()
+
+
+def divider(master):
+    return Divider(master)
+
+
+def section_header(master, app, text, first=False):
+    widget = label(master, text, app.fonts.body_strong)
+    widget.pack(fill="x", pady=(0 if first else 22, 6))
+    return widget
+
+
+def settings_card(master, app, glyph, title, description=None):
+    """A WinUI SettingsCard: icon, title and description on the left, the control on the right.
+    Returns the card, the frame for the control and the texts frame."""
+    box = card(master)
+    box.pack(fill="x", pady=(0, 4))
+    row = ctk.CTkFrame(box, fg_color="transparent")
+    row.pack(fill="x", padx=(16, 16), pady=14)
+    if glyph:
+        glyph_label(row, app, glyph, 20).pack(side="left", padx=(2, 18))
+    right = ctk.CTkFrame(row, fg_color="transparent")
+    right.pack(side="right", padx=(16, 0))
+    texts = ctk.CTkFrame(row, fg_color="transparent")
+    texts.pack(side="left", fill="x", expand=True)
+    label(texts, title, app.fonts.body).pack(fill="x")
+    if description:
+        wrapping(label(texts, description, app.fonts.caption, "text2")).pack(fill="x")
+    box.row = row
+    return box, right, texts
+
+
+def infobar(master, app, text, glyph="info", token="accent"):
+    """A WinUI InfoBar (informational): icon and message on a quiet card."""
+    box = card(master, color="card_secondary")
+    row = ctk.CTkFrame(box, fg_color="transparent")
+    row.pack(fill="x", padx=16, pady=10)
+    glyph_label(row, app, glyph, 16, token).pack(side="left", padx=(0, 12), anchor="n", pady=2)
+    holder = ctk.CTkFrame(row, fg_color="transparent")
+    holder.pack(side="left", fill="x", expand=True)
+    wrapping(label(holder, text, app.fonts.small)).pack(fill="x")
+    return box
 
 
 def tile(master, app, name, image=None, protected=False):
-    """34 px square: the application's icon, or its initial on a coloured background."""
+    """32 px square: the application's icon, or its initial on a coloured background."""
     if image is not None:
-        box = ctk.CTkFrame(master, width=34, height=34, corner_radius=8, fg_color=C["tile"])
+        box = ctk.CTkFrame(master, width=32, height=32, corner_radius=6, fg_color="transparent")
         inner = ctk.CTkLabel(box, text="", image=image, width=24, height=24, fg_color="transparent")
     else:
-        box = ctk.CTkFrame(master, width=34, height=34, corner_radius=8,
-                           fg_color=C["tile"] if protected else tile_color(name))
+        box = ctk.CTkFrame(master, width=32, height=32, corner_radius=6,
+                           fg_color=C["neutral_bg"] if protected else tile_color(name))
         inner = ctk.CTkLabel(box, text=tile_letter(name), font=app.fonts.tile, width=24, height=24,
-                             fg_color="transparent", text_color=C["muted"] if protected else WHITE)
+                             fg_color="transparent", text_color=C["text2"] if protected else ("#ffffff", "#dfdfdf"))
     box.pack_propagate(False)
     inner.place(relx=0.5, rely=0.5, anchor="center")
     box.inner = inner
@@ -156,21 +302,53 @@ def set_tile_icon(box, image):
     """Show an icon that arrived after the tile was drawn with the application's initial."""
     try:
         if image is not None and box.winfo_exists():
-            box.configure(fg_color=C["tile"])
+            box.configure(fg_color="transparent")
             box.inner.configure(text="", image=image)
     except tk.TclError:
         pass  # the card was rebuilt in the meantime
 
 
+STATUS_STYLES = {   # status pill: background and text colour tokens
+    "neutral": ("neutral_bg", "text2"),
+    "success": ("success_bg", "success"),
+    "caution": ("caution_bg", "caution"),
+    "critical": ("critical_bg", "critical"),
+}
+
+
 def pill(master, app):
-    return ctk.CTkLabel(master, text="", font=app.fonts.small_bold, height=28, corner_radius=14, padx=12)
+    return ctk.CTkLabel(master, text="", font=app.fonts.caption_strong, height=24, corner_radius=12, padx=10)
+
+
+class Page(ctk.CTkFrame):
+    """A page on the content layer: rounded top-left corner and edge, like WinUI pages."""
+
+    def __init__(self, app):
+        super().__init__(app.content, fg_color=C["layer"], bg_color=C["bg"], corner_radius=8, border_width=1,
+                         border_color=C["layer_border"])
+        self.app = app
+        # CustomTkinter refuses a size in place(); the layer must overhang its area, so Tk's own
+        # placer is used with the overhang in real pixels.
+        overhang = scaled(self, OVERHANG)
+        tk.Place.place_configure(self, x=0, y=0, relwidth=1, relheight=1, width=overhang, height=overhang)
+
+
+def page_header(page, app, title, row=0, pady=(28, 16)):
+    """Title of a page. Returns the header (actions go on its right) and the block under the
+    title (for a subtitle)."""
+    header = ctk.CTkFrame(page, fg_color="transparent")
+    header.grid(row=row, column=0, sticky="ew", padx=(PAD, PAD_RIGHT), pady=pady)
+    titles = ctk.CTkFrame(header, fg_color="transparent")
+    titles.pack(side="left", fill="x", expand=True)
+    label(titles, title, app.fonts.title).pack(fill="x")
+    return header, titles
 
 
 class Dialog(ctk.CTkToplevel):
-    """Modal message in the application's style (confirmation when `confirm_text` is given)."""
+    """A WinUI ContentDialog in its own window (confirmation when `confirm_text` is given)."""
 
     def __init__(self, app, title, message, items=(), confirm_text=None, on_confirm=None, cancel_text=None):
-        super().__init__(app, fg_color=C["bg"])
+        super().__init__(app, fg_color=C["layer"])
         self.app, self.on_confirm = app, on_confirm
         self._counted = True
         app.dialogs += 1   # automatic list refreshes wait while a dialog is open
@@ -183,27 +361,34 @@ class Dialog(ctk.CTkToplevel):
         self.resizable(False, False)
         self.transient(app)
         body = ctk.CTkFrame(self, fg_color="transparent")
-        body.pack(fill="both", expand=True, padx=24, pady=22)
-        label(body, title, app.fonts.h2).pack(fill="x")
-        label(body, message, app.fonts.body, "muted", wraplength=440).pack(fill="x", pady=(6, 0))
+        body.pack(fill="both", expand=True, padx=24, pady=(22, 24))
+        label(body, title, app.fonts.subtitle, wraplength=460).pack(fill="x")
+        label(body, message, app.fonts.body, wraplength=460).pack(fill="x", pady=(12, 0))
         items = list(items)
         if items:
             shown, hidden = core.truncate(items, MAX_DIALOG_ITEMS)
-            box = ctk.CTkFrame(body, fg_color=C["inset"], corner_radius=8)
-            box.pack(fill="x", pady=(14, 0))
+            box = card(body)
+            box.pack(fill="x", pady=(16, 0))
             for item in shown:
-                label(box, f"•  {shorten(item, 70)}", app.fonts.body).pack(fill="x", padx=12, pady=(6, 0))
+                label(box, f"•  {shorten(item, 70)}", app.fonts.body).pack(fill="x", padx=14, pady=(8, 0))
             if hidden:
-                label(box, app.t("more_items", count=hidden), app.fonts.small, "muted").pack(fill="x", padx=12, pady=(6, 0))
-            ctk.CTkFrame(box, fg_color="transparent", height=8).pack()
-        buttons = ctk.CTkFrame(body, fg_color="transparent")
-        buttons.pack(fill="x", pady=(20, 0))
+                label(box, app.t("more_items", count=hidden), app.fonts.caption, "text2").pack(
+                    fill="x", padx=14, pady=(6, 0))
+            box.winfo_children()[-1].pack_configure(pady=(6, 12))
+        divider(self).pack(fill="x")
+        footer = ctk.CTkFrame(self, fg_color=C["bg"], corner_radius=0)
+        footer.pack(fill="x")
+        buttons = ctk.CTkFrame(footer, fg_color="transparent")
+        buttons.pack(fill="x", padx=24, pady=24)
+        buttons.grid_columnconfigure((0, 1), weight=1, uniform="buttons")
         if confirm_text:
-            primary_button(buttons, app, confirm_text, self._confirm).pack(side="right")
-            ghost_button(buttons, app, cancel_text or app.t("cancel"), self.destroy, height=44).pack(
-                side="right", padx=(0, 10))
+            button(buttons, app, confirm_text, self._confirm, style="accent", width=150).grid(
+                row=0, column=0, sticky="ew", padx=(0, 4))
+            button(buttons, app, cancel_text or app.t("cancel"), self.destroy, width=150).grid(
+                row=0, column=1, sticky="ew", padx=(4, 0))
         else:
-            primary_button(buttons, app, app.t("ok"), self.destroy, width=100).pack(side="right")
+            button(buttons, app, app.t("ok"), self.destroy, style="accent", width=150).grid(
+                row=0, column=1, sticky="ew")
         self.bind("<Escape>", lambda _e: self.destroy())
         self.bind("<Return>", lambda _e: self._confirm() if confirm_text else self.destroy())
         self.update_idletasks()
@@ -215,6 +400,7 @@ class Dialog(ctk.CTkToplevel):
 
     def _raise(self):
         try:
+            self.app.apply_backdrop(self)
             self.lift()
             self.focus_force()
             self.grab_set()
@@ -250,40 +436,36 @@ class Entry:
 
 class AppCard(ctk.CTkFrame):
     def __init__(self, master, page, entry, image):
-        super().__init__(master, fg_color=C["surface"], border_color=C["border"], border_width=1, corner_radius=10)
+        super().__init__(master, fg_color=C["card_secondary" if entry.protected else "card"],
+                         border_color=C["card_border"], border_width=1, corner_radius=4)
         app = page.app
         self.page, self.entry, self.windows_frame = page, entry, None
         row = ctk.CTkFrame(self, fg_color="transparent")
-        row.pack(fill="x", padx=8, pady=6)
+        row.pack(fill="x", padx=(16, 8), pady=12)
         clickable = [row]
         if entry.protected:
-            lock = label(row, app.fonts.glyph("lock"), app.fonts.icon_small, "faint", width=24)
-            lock.pack(side="left", padx=(6, 8))
+            glyph_label(row, app, "lock", 16, "text3", width=20).pack(side="left", padx=(0, 16))
             self.check = None
         else:
-            self.check = ctk.CTkCheckBox(row, text="", width=24, checkbox_width=20, checkbox_height=20, corner_radius=5,
-                                         border_width=2, fg_color=ACCENT, hover_color=ACCENT_HOVER,
-                                         border_color=C["faint"], checkmark_color=WHITE, command=self._on_check)
-            self.check.pack(side="left", padx=(6, 8))
+            self.check = checkbox(row, self._on_check)
+            self.check.pack(side="left", padx=(0, 12))
         icon = tile(row, app, entry.name, image, entry.protected)
-        icon.pack(side="left", padx=(0, 14), pady=4)
+        icon.pack(side="left", padx=(0, 16))
         self.tile = icon
         texts = ctk.CTkFrame(row, fg_color="transparent")
         texts.pack(side="left", fill="x", expand=True)
-        name = label(texts, entry.name, app.fonts.name, "muted" if entry.protected else "text")
+        name = label(texts, entry.name, app.fonts.body_strong, "text2" if entry.protected else "text")
         name.pack(fill="x")
-        meta = label(texts, entry.meta, app.fonts.small, "faint" if entry.protected else "muted")
+        meta = label(texts, entry.meta, app.fonts.caption, "text3" if entry.protected else "text2")
         meta.pack(fill="x")
         clickable += [icon, icon.inner, texts, name, meta]
         self.chevron = None
         if entry.titles:
-            self.chevron = icon_button(row, app, "chevron_right", self.toggle_expand, size=40)
+            self.chevron = icon_button(row, app, "chevron_down", self.toggle_expand)
             self.chevron.pack(side="right")
         if not entry.protected:
             for widget in clickable:
                 widget.bind("<Button-1>", lambda _e: self.check.toggle())
-        if entry.protected:
-            self.configure(border_color=C["border"], fg_color=C["bg"])
 
     def _on_check(self):
         self.page.set_selected(self.entry.proc_key, bool(self.check.get()))
@@ -295,8 +477,7 @@ class AppCard(ctk.CTkFrame):
             self.check.select()
         else:
             self.check.deselect()
-        self.configure(fg_color=C["sel_bg"] if selected else C["surface"],
-                       border_color=C["sel_border"] if selected else C["border"])
+        self.configure(fg_color=C["card_selected"] if selected else C["card"])
 
     def toggle_expand(self):
         expanded = self.entry.card_key not in self.page.expanded
@@ -310,25 +491,56 @@ class AppCard(ctk.CTkFrame):
         if self.chevron is None:
             return
         app = self.page.app
-        self.chevron.configure(text=app.fonts.glyph("chevron_down" if expanded else "chevron_right"))
+        self.chevron.configure(image=app.glyphs.image("chevron_up" if expanded else "chevron_down", 16))
         if expanded and self.windows_frame is None:
             # Built on first use: most cards are never expanded.
             self.windows_frame = ctk.CTkFrame(self, fg_color="transparent")
+            divider(self.windows_frame).pack(fill="x", padx=1)
             for title in self.entry.titles:
-                row = ctk.CTkFrame(self.windows_frame, fg_color=C["inset"], corner_radius=6)
-                row.pack(fill="x", pady=(0, 3))
-                label(row, f"•   {shorten(title)}", app.fonts.small).pack(fill="x", padx=12, pady=6)
+                row = ctk.CTkFrame(self.windows_frame, fg_color="transparent")
+                row.pack(fill="x", padx=(96, 16), pady=(8, 0))
+                glyph_label(row, app, "window", 14, "text2").pack(side="left", padx=(0, 12))
+                label(row, shorten(title), app.fonts.small, "text2").pack(side="left", fill="x", expand=True)
+            row.pack_configure(pady=(8, 12))
         if self.windows_frame is not None:
             if expanded:
-                self.windows_frame.pack(fill="x", padx=(86, 16), pady=(0, 10))
+                self.windows_frame.pack(fill="x", padx=1, pady=(0, 1))
             else:
                 self.windows_frame.pack_forget()
 
 
-class ListPage(ctk.CTkFrame):
+class SelectorBar(ctk.CTkFrame):
+    """WinUI SelectorBar: text items, the selected one in bold with an accent mark under it."""
+
+    def __init__(self, master, app, names, command):
+        super().__init__(master, fg_color="transparent")
+        self.app, self.command, self.items, self.current = app, command, {}, names[0]
+        for name in names:
+            item = ctk.CTkButton(self, text="", command=lambda n=name: self.select(n, notify=True), height=40,
+                                 width=60, corner_radius=4, fg_color="transparent", hover_color=C["subtle_hover"],
+                                 text_color=C["text2"], font=app.fonts.body)
+            item.pack(side="left", padx=(0, 4))
+            self.items[name] = item
+        self.mark = ctk.CTkFrame(self, width=16, height=3, corner_radius=2, fg_color=C["accent"])
+        self.select(names[0])
+
+    def set_text(self, name, text):
+        self.items[name].configure(text=text)
+
+    def select(self, name, notify=False):
+        self.current = name
+        for key, item in self.items.items():
+            item.configure(text_color=C["text"] if key == name else C["text2"],
+                           font=self.app.fonts.body_strong if key == name else self.app.fonts.body)
+        self.mark.place(in_=self.items[name], relx=0.5, rely=1.0, anchor="s", y=-3)
+        self.mark.lift()
+        if notify:
+            self.command(name)
+
+
+class ListPage(Page):
     def __init__(self, app, state=None):
-        super().__init__(app, fg_color=C["bg"], corner_radius=0)
-        self.app = app
+        super().__init__(app)
         t = app.t
         state = state or {}
         self.windows, self.entries, self.cards = [], [], {}
@@ -340,75 +552,65 @@ class ListPage(ctk.CTkFrame):
         self.notice = None          # status-bar message shown for NOTICE_MS
         self.notice_job = None
         self.refresh_jobs, self.retry_job = [], None
+        self.restarting_explorer = False
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(2, weight=1)
 
         header, titles = page_header(self, app, t("apps_title"))
-        self.summary = label(titles, "", app.fonts.body, "muted")
+        self.summary = label(titles, "", app.fonts.body, "text2")
         self.summary.pack(fill="x", pady=(2, 0))
         actions = ctk.CTkFrame(header, fg_color="transparent")
-        actions.pack(side="right", anchor="s")
-        refresh = ctk.CTkButton(actions, text=app.fonts.glyph("refresh"), command=self.refresh, width=40, height=40,
-                                corner_radius=8, border_width=1, border_color=C["border_strong"],
-                                fg_color=C["surface"], hover_color=C["hover"], text_color=C["text"],
-                                font=app.fonts.icon_small)
-        refresh.pack(side="right")
+        actions.pack(side="right", anchor="n", pady=(4, 0))
+        icon_button(actions, app, "refresh", self.refresh, style="standard").pack(side="right")
         if not app.is_admin:
-            admin = ctk.CTkButton(actions, text=f"{t('admin_button')}", command=app.restart_as_admin, height=40,
-                                  corner_radius=8, border_width=1, border_color=C["border_strong"],
-                                  fg_color=C["surface"], hover_color=C["hover"], text_color=C["text"],
-                                  font=app.fonts.body)
-            admin.pack(side="right", padx=(0, 8))
+            button(actions, app, t("admin_button"), app.restart_as_admin, icon="shield").pack(side="right", padx=(0, 8))
 
         toolbar = ctk.CTkFrame(self, fg_color="transparent")
-        toolbar.grid(row=1, column=0, sticky="ew", padx=28, pady=(0, 14))
-        search = ctk.CTkFrame(toolbar, fg_color=C["inset"], border_color=C["border_strong"], border_width=1,
-                              corner_radius=8, height=40)
-        search.pack(side="left", fill="x", expand=True, padx=(0, 12))
-        label(search, app.fonts.glyph("search"), app.fonts.icon_small, "faint", width=20).pack(side="left", padx=(12, 4))
-        self.search = ctk.CTkEntry(search, placeholder_text=t("search_placeholder"), font=app.fonts.body, height=36,
-                                   border_width=0, fg_color=C["inset"], text_color=C["text"],
-                                   placeholder_text_color=C["faint"])
-        self.search.pack(side="left", fill="x", expand=True, padx=(0, 8), pady=2)
+        toolbar.grid(row=1, column=0, sticky="ew", padx=(PAD, PAD_RIGHT), pady=(0, 12))
+        self.filter_bar = SelectorBar(toolbar, app, ["all", "selected"], self._on_filter)
+        self.filter_bar.pack(side="right", padx=(24, 0))
+        search = ctk.CTkFrame(toolbar, fg_color=C["input"], border_color=C["input_border"], border_width=1,
+                              corner_radius=4, height=32)
+        search.pack(side="left", fill="x", expand=True)
+        glyph_label(search, app, "search", 16, "text2").pack(side="right", padx=(4, 10))
+        self.search = ctk.CTkEntry(search, placeholder_text=t("search_placeholder"), font=app.fonts.body, height=28,
+                                   border_width=0, corner_radius=0, fg_color=C["input"], text_color=C["text"],
+                                   placeholder_text_color=C["text2"])
+        self.search.pack(side="left", fill="x", expand=True, padx=(8, 0), pady=2)
         if state.get("query"):
             self.search.insert(0, state["query"])
         self.search.bind("<KeyRelease>", self._schedule_filter)
         self.search.bind("<Escape>", self._clear_search)
-        self.filter_button = segmented(toolbar, app, ["all", "selected"], self._on_filter)
-        self.filter_button.pack(side="right")
 
         self.list = scroll_area(self)
-        self.list.grid(row=2, column=0, sticky="nsew", padx=(20, 8))
-        self.empty = label(self.list, "", app.fonts.body, "muted", anchor="center", justify="center")
+        self.list.grid(row=2, column=0, sticky="nsew", padx=(PAD - 8, PAD_RIGHT - 16))
+        self.empty = label(self.list, "", app.fonts.body, "text2", anchor="center", justify="center")
         self.protected_header = ctk.CTkFrame(self.list, fg_color="transparent")
-        label(self.protected_header, app.fonts.glyph("lock"), app.fonts.icon_small, "muted", width=18).pack(side="left")
-        label(self.protected_header, t("protected_header").upper(), app.fonts.small_bold, "muted").pack(side="left", padx=6)
+        glyph_label(self.protected_header, app, "lock", 14, "text2").pack(side="left", padx=(2, 8))
+        label(self.protected_header, t("protected_header"), app.fonts.body_strong, "text2").pack(side="left")
 
-        bar = ctk.CTkFrame(self, fg_color=C["bar"], corner_radius=0, border_width=0)
-        bar.grid(row=3, column=0, sticky="ew")
+        divider(self).grid(row=3, column=0, sticky="ew", padx=(1, OVERHANG))
+        bar = ctk.CTkFrame(self, fg_color="transparent", corner_radius=0)
+        bar.grid(row=4, column=0, sticky="ew", padx=(1, OVERHANG), pady=(0, OVERHANG))
+        self.close_button = button(bar, app, "", self.close_selected, style="accent", font=app.fonts.body_strong)
+        self.close_button.pack(side="right", padx=(0, PAD), pady=16)
+        self.clear_button = button(bar, app, t("clear_selection"), self.clear_selection)
+        self.explorer_menu = tk.Menu(self, tearoff=0)
+        self.explorer_menu.add_command(label=t("close_explorer_short"), command=self.close_explorer)
+        self.explorer_menu.add_command(label=t("restart_explorer_short"), command=self.restart_explorer)
+        self.explorer_button = button(bar, app, f"{t('explorer_group')}  ⌄", self._show_explorer_menu, icon="folder")
+        self.explorer_button.pack(side="right", padx=(0, 8), pady=16)
         texts = ctk.CTkFrame(bar, fg_color="transparent")
-        self.selection_line = label(texts, "", app.fonts.body_bold)
+        self.selection_line = label(texts, "", app.fonts.body_strong)
         self.selection_line.pack(fill="x")
-        self.hint = label(texts, "", app.fonts.small, "muted")
-        self.hint.pack(fill="x")
-        self.close_button = primary_button(bar, app, "", self.close_selected)
-        self.close_button.pack(side="right", padx=(0, 28))
-        self.clear_button = ghost_button(bar, app, t("clear_selection"), self.clear_selection, height=44)
-        # File Explorer actions, side by side under a small caption.
-        explorer = ctk.CTkFrame(bar, fg_color="transparent")
-        explorer.pack(side="right", padx=(0, 16), pady=(8, 10))
-        label(explorer, t("explorer_group"), app.fonts.small, "muted").pack(fill="x")
-        explorer_buttons = ctk.CTkFrame(explorer, fg_color="transparent")
-        explorer_buttons.pack(fill="x", pady=(2, 0))
-        self.explorer_button = ghost_button(explorer_buttons, app, t("close_explorer_short"), self.close_explorer,
-                                            height=36, width=100)
-        self.explorer_button.pack(side="left")
-        self.restart_explorer_button = ghost_button(explorer_buttons, app, t("restart_explorer_short"),
-                                                    self.restart_explorer, height=36, width=100)
-        self.restart_explorer_button.pack(side="left", padx=(8, 0))
-        self.restarting_explorer = False
+        hint = ctk.CTkFrame(texts, fg_color="transparent")
+        hint.pack(fill="x")
+        self.hint_icon = glyph_label(hint, app, "warning", 12, "caution")
+        self.hint_icon.pack(side="left", padx=(0, 6))
+        self.hint = label(hint, "", app.fonts.caption, "text2")
+        self.hint.pack(side="left", fill="x", expand=True)
         # Packed after the buttons: they keep their full width and the texts take what is left.
-        texts.pack(side="left", fill="x", expand=True, padx=28, pady=14)
+        texts.pack(side="left", fill="x", expand=True, padx=(PAD - 1, 16), pady=14)
         texts.bind("<Configure>", self._wrap_bar_texts)
 
     def _wrap_bar_texts(self, event):
@@ -416,7 +618,11 @@ class ListPage(ctk.CTkFrame):
         width = max(80, int(event.width / self._get_widget_scaling()))
         for widget in (self.selection_line, self.hint):
             if widget.cget("wraplength") != width:
-                widget.configure(wraplength=width)
+                widget.configure(wraplength=width - (20 if widget is self.hint else 0))
+
+    def _show_explorer_menu(self):
+        widget = self.explorer_button
+        self.explorer_menu.tk_popup(widget.winfo_rootx(), widget.winfo_rooty() + widget.winfo_height() + 2)
 
     # ---------------------------------------------------------------- data
     def refresh(self, rebuild=False):
@@ -459,25 +665,25 @@ class ListPage(ctk.CTkFrame):
     def _build_cards(self, rebuild=False):
         old, self.cards = self.cards, {}
         for entry in self.entries:
-            card = old.pop(entry.card_key, None)
-            if card is not None and (rebuild or card.entry != entry):
-                card.destroy()
-                card = None
-            if card is None:
+            card_widget = old.pop(entry.card_key, None)
+            if card_widget is not None and (rebuild or card_widget.entry != entry):
+                card_widget.destroy()
+                card_widget = None
+            if card_widget is None:
                 image = None
                 if self.app.settings["show_icons"]:
                     image = self.app.icon_for(entry.exe_path, lambda img, key=entry.card_key: self._icon_ready(key, img))
-                card = AppCard(self.list, self, entry, image)
-                card.show_expanded(entry.card_key in self.expanded)
-            card.show_selected(entry.proc_key in self.selected)
-            self.cards[entry.card_key] = card
-        for card in old.values():
-            card.destroy()
+                card_widget = AppCard(self.list, self, entry, image)
+                card_widget.show_expanded(entry.card_key in self.expanded)
+            card_widget.show_selected(entry.proc_key in self.selected)
+            self.cards[entry.card_key] = card_widget
+        for card_widget in old.values():
+            card_widget.destroy()
 
     def _icon_ready(self, card_key, image):
-        card = self.cards.get(card_key)
-        if card is not None:
-            set_tile_icon(card.tile, image)
+        card_widget = self.cards.get(card_key)
+        if card_widget is not None:
+            set_tile_icon(card_widget.tile, image)
 
     # ---------------------------------------------------------------- automatic refresh
     def schedule_refreshes(self, delays_ms):
@@ -509,8 +715,8 @@ class ListPage(ctk.CTkFrame):
         self.search.delete(0, "end")
         self.apply_filter()
 
-    def _on_filter(self, value):
-        self.filter = "selected" if value == self.filter_button.cget("values")[1] else "all"
+    def _on_filter(self, name):
+        self.filter = "selected" if name == "selected" else "all"
         self.apply_filter()
 
     def apply_filter(self):
@@ -526,11 +732,11 @@ class ListPage(ctk.CTkFrame):
             normal = [e for e in normal if e.proc_key in self.selected]
             protected = []
         for entry in normal:
-            self.cards[entry.card_key].pack(fill="x", padx=(0, 12), pady=(0, 8))
+            self.cards[entry.card_key].pack(fill="x", padx=(8, 12), pady=(0, 4))
         if protected:
-            self.protected_header.pack(fill="x", padx=4, pady=(14, 8))
+            self.protected_header.pack(fill="x", padx=10, pady=(18, 8))
             for entry in protected:
-                self.cards[entry.card_key].pack(fill="x", padx=(0, 12), pady=(0, 8))
+                self.cards[entry.card_key].pack(fill="x", padx=(8, 12), pady=(0, 4))
         if not normal and not protected:
             if query:
                 text = t("no_match", query=self.search.get().strip())
@@ -563,23 +769,30 @@ class ListPage(ctk.CTkFrame):
     def update_counts(self):
         app, t = self.app, self.app.t
         self.summary.configure(text=f"{app.tn('n_windows', len(self.windows))} · {app.tn('n_apps', self.app_count)}")
-        values = [t("filter_all", count=self.selectable_count), t("filter_selected", count=len(self.selected))]
-        self.filter_button.configure(values=values)
-        self.filter_button.set(values[1] if self.filter == "selected" else values[0])
+        self.filter_bar.set_text("all", t("filter_all", count=self.selectable_count))
+        self.filter_bar.set_text("selected", t("filter_selected", count=len(self.selected)))
+        self.filter_bar.select("selected" if self.filter == "selected" else "all")
         count = len(self.selected)
         windows = sum(1 for w in self.windows if w.key in self.selected)
         if count:
             self.selection_line.configure(text=f"{app.tn('n_selected', count)} · {app.tn('n_windows', windows)}")
-            self.close_button.configure(text=app.tn("close_button", count), state="normal")
-            self.clear_button.pack(side="right", padx=(0, 10), after=self.close_button)
+            self.close_button.configure(text=app.tn("close_button", count))
+            set_enabled(self.close_button, True)
+            self.clear_button.pack(side="right", padx=(0, 8), pady=16, after=self.close_button)
         else:
             self.selection_line.configure(text=t("selection_none"))
-            self.close_button.configure(text=t("close_button_none"), state="disabled")
+            self.close_button.configure(text=t("close_button_none"))
+            set_enabled(self.close_button, False)
             self.clear_button.pack_forget()
         if self.notice:
             self.selection_line.configure(text=self.notice)
-        self.hint.configure(text=t("close_hint_instant") if app.settings["instant_force"]
+        instant = app.settings["instant_force"]
+        self.hint.configure(text=t("close_hint_instant") if instant
                             else t("close_hint", seconds=app.settings["close_timeout"]))
+        if instant:
+            self.hint_icon.pack(side="left", padx=(0, 6), before=self.hint)
+        else:
+            self.hint_icon.pack_forget()
 
     # ---------------------------------------------------------------- closing
     def close_selected(self):
@@ -597,7 +810,8 @@ class ListPage(ctk.CTkFrame):
         if app.settings["confirm_before_terminate"]:
             items = [f"{app.display_name(x.exe_path) or app.t('process_n', pid=x.pid)} — "
                      f"{app.tn('n_windows', len(x.titles))}" for x in targets]
-            Dialog(app, app.t("confirm_title"), app.t("confirm_message_instant" if instant else "confirm_message", seconds=timeout), items,
+            Dialog(app, app.t("confirm_title"), app.t("confirm_message_instant" if instant else "confirm_message",
+                                                      seconds=timeout), items,
                    app.tn("close_button", len(targets)), start)
         else:
             start()
@@ -605,7 +819,7 @@ class ListPage(ctk.CTkFrame):
     def close_explorer(self):
         """Close File Explorer windows only; explorer.exe (desktop, taskbar) keeps running."""
         app = self.app
-        if app.busy:
+        if app.busy or self.restarting_explorer:
             return
         count = core.close_explorer_windows()
         self.notice = app.tn("explorer_closed", count) if count else app.t("explorer_none")
@@ -626,8 +840,7 @@ class ListPage(ctk.CTkFrame):
     def _start_explorer_restart(self):
         app = self.app
         self.restarting_explorer = True
-        for button in (self.explorer_button, self.restart_explorer_button):
-            button.configure(state="disabled")
+        set_enabled(self.explorer_button, False)
         self._show_notice(app.t("explorer_restarting"), keep=True)
 
         def run():
@@ -635,7 +848,7 @@ class ListPage(ctk.CTkFrame):
                 core.restart_explorer()
             except core.ProcessError as exc:
                 app.call_soon(lambda error=exc: self._explorer_restarted(error))
-            except Exception as exc:   # never leave the buttons disabled
+            except Exception as exc:   # never leave the button disabled
                 log.exception("explorer restart failed")
                 app.call_soon(lambda error=core.ProcessError("os_error", str(exc)): self._explorer_restarted(error))
             else:
@@ -646,8 +859,7 @@ class ListPage(ctk.CTkFrame):
         app, t = self.app, self.app.t
         self.restarting_explorer = False
         try:
-            for button in (self.explorer_button, self.restart_explorer_button):
-                button.configure(state="normal")
+            set_enabled(self.explorer_button, True)
         except tk.TclError:
             return   # page rebuilt meanwhile (language change)
         if error is None:
@@ -681,7 +893,7 @@ class ListPage(ctk.CTkFrame):
 
 class ClosingRow(ctk.CTkFrame):
     def __init__(self, master, page, target):
-        super().__init__(master, fg_color=C["surface"], border_color=C["border"], border_width=1, corner_radius=10)
+        super().__init__(master, fg_color=C["card"], border_color=C["card_border"], border_width=1, corner_radius=4)
         app = page.app
         self.page, self.target = page, target
         top = ctk.CTkFrame(self, fg_color="transparent")
@@ -691,62 +903,66 @@ class ClosingRow(ctk.CTkFrame):
         if app.settings["show_icons"]:
             image = app.icon_for(target.exe_path, lambda img: set_tile_icon(self.tile, img))
         self.tile = tile(top, app, name, image)
-        self.tile.pack(side="left", padx=(0, 14))
+        self.tile.pack(side="left", padx=(0, 16))
         texts = ctk.CTkFrame(top, fg_color="transparent")
         texts.pack(side="left", fill="x", expand=True)
-        label(texts, name, app.fonts.name).pack(fill="x")
+        label(texts, name, app.fonts.body_strong).pack(fill="x")
         meta = " · ".join([shorten(", ".join(target.titles), 80), app.t("pid", pid=target.pid)])
-        label(texts, meta, app.fonts.small, "muted").pack(fill="x")
+        label(texts, meta, app.fonts.caption, "text2").pack(fill="x")
         self.pill = pill(top, app)
         self.pill.pack(side="right")
         self.body = ctk.CTkFrame(self, fg_color="transparent", corner_radius=0)
-        self.explain = label(self.body, "", app.fonts.small, "warn_text", wraplength=470)
-        self.explain.pack(side="left", fill="x", expand=True, padx=(64, 12), pady=(0, 14))
-        self.leave = ghost_button(self.body, app, app.t("leave_open"), self._leave, height=40)
-        self.show = ghost_button(self.body, app, f"{app.t('show_window')}", self._show, height=40)
+        self.explain_icon = glyph_label(self.body, app, "warning", 14, "caution")
+        self.explain_icon.pack(side="left", padx=(64, 8), pady=(0, 14), anchor="n")
+        holder = ctk.CTkFrame(self.body, fg_color="transparent")
+        holder.pack(side="left", fill="x", expand=True, padx=(0, 12), pady=(0, 14))
+        self.explain = wrapping(label(holder, "", app.fonts.small, "text"))
+        self.explain.pack(fill="x")
+        self.leave = button(self.body, app, app.t("leave_open"), self._leave)
+        self.show = button(self.body, app, app.t("show_window"), self._show, icon="window")
         self.set_waiting()
 
-    def _style(self, text, bg, fg, border):
-        self.pill.configure(text=text, fg_color=C[bg], text_color=C[fg])
-        self.configure(border_color=C[border])
+    def _style(self, text, kind):
+        background, foreground = STATUS_STYLES[kind]
+        self.pill.configure(text=text, fg_color=C[background], text_color=C[foreground])
 
     def set_waiting(self):
-        self._style(self.page.app.t("status_waiting"), "neutral_bg", "muted", "border")
+        self._style(self.page.app.t("status_waiting"), "neutral")
 
     def set_forcing(self):
-        self._style(self.page.app.t("status_forcing"), "neutral_bg", "muted", "border")
+        self._style(self.page.app.t("status_forcing"), "neutral")
         self.body.pack_forget()
 
     def set_result(self, result):
         app = self.page.app
         self.body.pack_forget()
-        self.configure(fg_color=C["surface"])
         if result.status == core.CLOSED:
             text = (app.t("status_closed", seconds=format_seconds(app.language, result.elapsed))
                     if result.elapsed >= 0.1 else app.t("log_closed"))
-            self._style(text, "ok_bg", "ok_fg", "border")
+            self._style(text, "success")
         elif result.status == core.FORCED:
-            self._style(app.t("status_forced"), "warn_pill", "warn_fg", "border")
+            self._style(app.t("status_forced"), "caution")
         elif result.status == core.STILL_RUNNING:
-            self._style(app.t("status_still"), "warn_pill", "warn_fg", "warn_border")
-            self.configure(fg_color=C["warn_bg"])
-            self.explain.configure(text=app.t("still_explain", seconds=self.page.timeout), text_color=C["warn_text"])
-            self.leave.pack(side="right", padx=(0, 16), pady=(0, 14))
-            self.show.pack(side="right", padx=(0, 8), pady=(0, 14))
+            self._style(app.t("status_still"), "caution")
+            self.explain_icon.configure(image=app.glyphs.image("warning", 14, "caution"))
+            self.explain.configure(text=app.t("still_explain", seconds=self.page.timeout))
+            # Packed before the explanation, which takes the width that is left.
+            self.leave.pack(side="right", padx=(0, 16), pady=(0, 14), anchor="n", before=self.explain_icon)
+            self.show.pack(side="right", padx=(0, 8), pady=(0, 14), anchor="n", before=self.explain_icon)
             self.body.pack(fill="x", padx=2, pady=(0, 2))
         else:  # FAILED
-            self._style(app.t("status_failed"), "err_bg", "err_fg", "err_border")
+            self._style(app.t("status_failed"), "critical")
             text = app.t(result.error_key, detail=result.detail) if result.error_key else ""
             if result.error_key == "access_denied" and not app.is_admin:
                 text += "\n" + app.t("admin_hint")
-            self.explain.configure(text=text[:1].upper() + text[1:], text_color=C["err_fg"])
+            self.explain_icon.configure(image=app.glyphs.image("warning", 14, "critical"))
+            self.explain.configure(text=text[:1].upper() + text[1:])
             self.leave.pack_forget()
             self.show.pack_forget()
             self.body.pack(fill="x", padx=2, pady=(0, 2))
 
     def set_left_open(self):
-        self._style(self.page.app.t("status_left"), "neutral_bg", "muted", "border")
-        self.configure(fg_color=C["surface"])
+        self._style(self.page.app.t("status_left"), "neutral")
         self.body.pack_forget()
 
     def _leave(self):
@@ -758,10 +974,9 @@ class ClosingRow(ctk.CTkFrame):
             winapi.bring_to_front(hwnds[0])
 
 
-class ClosingPage(ctk.CTkFrame):
+class ClosingPage(Page):
     def __init__(self, app):
-        super().__init__(app, fg_color=C["bg"], corner_radius=0)
-        self.app = app
+        super().__init__(app)
         t = app.t
         self.rows, self.results, self.left_open = {}, {}, set()
         self.targets, self.timeout, self.running, self.started = [], 0, False, 0.0
@@ -769,38 +984,36 @@ class ClosingPage(ctk.CTkFrame):
         self.grid_rowconfigure(2, weight=1)
 
         head = ctk.CTkFrame(self, fg_color="transparent")
-        head.grid(row=0, column=0, sticky="ew", padx=36, pady=(24, 0))
-        self.back = ctk.CTkButton(head, text=f"‹  {t('apps_title')}", command=self.finish, height=28, anchor="w",
-                                  fg_color="transparent", hover_color=C["hover"], text_color=C["muted"],
-                                  font=app.fonts.small, width=0)
+        head.grid(row=0, column=0, sticky="ew", padx=(PAD - 10, PAD_RIGHT), pady=(20, 0))
+        self.back = button(head, app, t("apps_title"), self.finish, icon="back", style="subtle", height=30,
+                           font=app.fonts.small)
         self.back.pack(anchor="w")
         line = ctk.CTkFrame(head, fg_color="transparent")
-        line.pack(fill="x", pady=(10, 0))
+        line.pack(fill="x", pady=(8, 0), padx=(10, 0))
         texts = ctk.CTkFrame(line, fg_color="transparent")
         texts.pack(side="left", fill="x", expand=True)
         self.title = label(texts, t("closing_title"), app.fonts.title)
         self.title.pack(fill="x")
-        self.subtitle = label(texts, "", app.fonts.body, "muted")
+        self.subtitle = label(texts, "", app.fonts.body, "text2")
         self.subtitle.pack(fill="x", pady=(2, 0))
-        self.elapsed = label(line, "", app.fonts.mono, "muted")
+        self.elapsed = label(line, "", app.fonts.mono, "text2")
         self.elapsed.pack(side="right", anchor="s")
-        self.progress = ctk.CTkProgressBar(self, height=6, corner_radius=3, fg_color=C["inset"], progress_color=ACCENT)
-        self.progress.grid(row=1, column=0, sticky="ew", padx=36, pady=(16, 18))
+        self.progress = progress_bar(self, height=4)
+        self.progress.grid(row=1, column=0, sticky="ew", padx=(PAD, PAD_RIGHT), pady=(16, 16))
 
         self.list = scroll_area(self)
-        self.list.grid(row=2, column=0, sticky="nsew", padx=(28, 8))
+        self.list.grid(row=2, column=0, sticky="nsew", padx=(PAD - 8, PAD_RIGHT - 16))
 
-        bar = ctk.CTkFrame(self, fg_color=C["bar"], corner_radius=0)
-        bar.grid(row=3, column=0, sticky="ew")
-        texts = ctk.CTkFrame(bar, fg_color="transparent")
-        texts.pack(side="left", fill="x", expand=True, padx=36, pady=14)
-        self.summary = label(texts, "", app.fonts.body_bold)
+        divider(self).grid(row=3, column=0, sticky="ew", padx=(1, OVERHANG))
+        bar = ctk.CTkFrame(self, fg_color="transparent", corner_radius=0)
+        bar.grid(row=4, column=0, sticky="ew", padx=(1, OVERHANG), pady=(0, OVERHANG))
+        texts = self.bar_texts = ctk.CTkFrame(bar, fg_color="transparent")
+        texts.pack(side="left", fill="x", expand=True, padx=(PAD - 1, 16), pady=14)
+        self.summary = wrapping(label(texts, "", app.fonts.body_strong), minimum=80)
         self.summary.pack(fill="x")
-        label(texts, t("closing_hint"), app.fonts.small, "muted").pack(fill="x")
-        self.force_button = ctk.CTkButton(bar, text="", command=self.force, font=app.fonts.body_bold, height=44,
-                                          corner_radius=8, fg_color=WARN_FILL, hover_color=WARN_FILL_HOVER,
-                                          text_color=WARN_ON)
-        self.done_button = ghost_button(bar, app, t("done"), self.finish, height=44)
+        wrapping(label(texts, t("closing_hint"), app.fonts.caption, "text2"), minimum=80).pack(fill="x")
+        self.force_button = button(bar, app, "", self.force, style="accent", icon="power", font=app.fonts.body_strong)
+        self.done_button = button(bar, app, t("done"), self.finish)
 
     def start(self, targets, timeout):
         self.targets, self.timeout = targets, timeout
@@ -810,7 +1023,7 @@ class ClosingPage(ctk.CTkFrame):
         self.rows = {}
         for target in targets:
             row = ClosingRow(self.list, self, target)
-            row.pack(fill="x", padx=(0, 12), pady=(0, 10))
+            row.pack(fill="x", padx=(8, 12), pady=(0, 4))
             self.rows[target.key] = row
         self.title.configure(text=self.app.t("closing_title"))
         self.subtitle.configure(text=self.app.tn("closing_subtitle", len(targets)))
@@ -896,13 +1109,13 @@ class ClosingPage(ctk.CTkFrame):
             text = (app.t("force_one_named", name=app.display_name(still[0].exe_path) or app.t("process_n", pid=still[0].pid))
                     if len(still) == 1 else app.t("force_count", count=len(still)))
             self.force_button.configure(text=text)
-            self.force_button.pack(side="right", padx=(0, 36))
-            self.done_button.pack(side="right", padx=(0, 10))
+            # Before the texts in the packing order: the buttons keep their full width.
+            self.force_button.pack(side="right", padx=(0, PAD), pady=16, before=self.bar_texts)
+            self.done_button.pack(side="right", padx=(0, 8), pady=16, before=self.bar_texts)
         else:
-            self.done_button.pack(side="right", padx=(0, 36))
-        state = "disabled" if self.running else "normal"
-        self.done_button.configure(state=state)
-        self.back.configure(state=state)
+            self.done_button.pack(side="right", padx=(0, PAD), pady=16, before=self.bar_texts)
+        set_enabled(self.done_button, not self.running)
+        set_enabled(self.back, not self.running)
 
     def leave_open(self, target):
         self.left_open.add(target.key)
@@ -954,21 +1167,22 @@ def format_log_line(app, line):
     return text
 
 
-class LogPage(ctk.CTkFrame):
+class LogPage(Page):
     def __init__(self, app):
-        super().__init__(app, fg_color=C["bg"], corner_radius=0)
-        self.app = app
+        super().__init__(app)
         t = app.t
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
         header, texts = page_header(self, app, t("log_title"))
-        label(texts, str(settings_mod.log_path()), app.fonts.small, "muted").pack(fill="x", pady=(2, 0))
-        ghost_button(header, app, t("log_open_file"), self.open_file).pack(side="right")
-        ghost_button(header, app, t("refresh"), self.load).pack(side="right", padx=(0, 8))
-        self.text = ctk.CTkTextbox(self, font=app.fonts.mono, fg_color=C["surface"], border_color=C["border"],
-                                   border_width=1, corner_radius=10, text_color=C["text"], wrap="none",
-                                   scrollbar_button_color=C["scroll"], scrollbar_button_hover_color=C["scroll_hover"])
-        self.text.grid(row=1, column=0, sticky="nsew", padx=28, pady=(0, 24))
+        label(texts, str(settings_mod.log_path()), app.fonts.body, "text2").pack(fill="x", pady=(2, 0))
+        actions = ctk.CTkFrame(header, fg_color="transparent")
+        actions.pack(side="right", anchor="n", pady=(4, 0))
+        button(actions, app, t("log_open_file"), self.open_file, icon="open").pack(side="right")
+        button(actions, app, t("refresh"), self.load, icon="refresh").pack(side="right", padx=(0, 8))
+        self.text = ctk.CTkTextbox(self, font=app.fonts.mono, fg_color=C["card"], border_color=C["card_border"],
+                                   border_width=1, corner_radius=4, text_color=C["text"], wrap="none",
+                                   scrollbar_button_color=C["text3"], scrollbar_button_hover_color=C["text2"])
+        self.text.grid(row=1, column=0, sticky="nsew", padx=(PAD, PAD_RIGHT), pady=(0, 28 + OVERHANG))
 
     def load(self):
         try:
@@ -991,30 +1205,30 @@ class LogPage(ctk.CTkFrame):
 
 # ====================================================================== background
 
-class BackgroundPage(ctk.CTkFrame):
+class BackgroundPage(Page):
     """The background processes (no window) using the most memory."""
 
     def __init__(self, app):
-        super().__init__(app, fg_color=C["bg"], corner_radius=0)
-        self.app = app
+        super().__init__(app)
         t = app.t
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(2, weight=1)
-        header, titles = page_header(self, app, t("background_title"), pady=(22, 10))
-        self.summary = label(titles, "", app.fonts.body, "muted")
+        header, titles = page_header(self, app, t("background_title"))
+        self.summary = label(titles, "", app.fonts.body, "text2")
         self.summary.pack(fill="x", pady=(2, 0))
-        ghost_button(header, app, t("refresh"), self.load).pack(side="right", anchor="n")
+        button(header, app, t("refresh"), self.load, icon="refresh").pack(side="right", anchor="n", pady=(4, 0))
 
         options = ctk.CTkFrame(self, fg_color="transparent")
-        options.grid(row=1, column=0, sticky="ew", padx=28, pady=(0, 12))
+        options.grid(row=1, column=0, sticky="ew", padx=(PAD, PAD_RIGHT), pady=(0, 12))
         self.include_system = ctk.BooleanVar(value=app.settings["background_include_system"])
-        switch(options, self.include_system, self._on_include_system, t("background_include_system"),
-               app.fonts.body).pack(fill="x")
-        self.hint = label(options, t("background_hint"), app.fonts.small, "muted", wraplength=680)
-        self.hint.pack(fill="x", pady=(6, 0))
+        _box, right, _texts = settings_card(options, app, "monitor", t("background_include_system"),
+                                            t("background_include_system_hint"))
+        Toggle(right, self.include_system, self._on_include_system).pack(side="right")
+        self.hint = infobar(options, app, t("background_hint"))
+        self.hint.pack(fill="x", pady=(8, 0))
 
         self.list = scroll_area(self)
-        self.list.grid(row=2, column=0, sticky="nsew", padx=(20, 8), pady=(0, 20))
+        self.list.grid(row=2, column=0, sticky="nsew", padx=(PAD - 8, PAD_RIGHT - 16), pady=(0, 16 + OVERHANG))
         self.report = None
         self.generation = 0   # the latest read; older ones arriving late are dropped
 
@@ -1067,127 +1281,156 @@ class BackgroundPage(ctk.CTkFrame):
 
     def _row(self, rank, process, largest):
         app = self.app
-        card = ctk.CTkFrame(self.list, fg_color=C["surface"], border_color=C["border"], border_width=1, corner_radius=10)
-        card.pack(fill="x", padx=8, pady=(0, 8))
-        row = ctk.CTkFrame(card, fg_color="transparent")
-        row.pack(fill="x", padx=12, pady=8)
-        label(row, str(rank), app.fonts.mono, "faint", width=24, anchor="e").pack(side="left", padx=(0, 12))
+        box = card(self.list)
+        box.pack(fill="x", padx=(8, 12), pady=(0, 4))
+        row = ctk.CTkFrame(box, fg_color="transparent")
+        row.pack(fill="x", padx=(12, 16), pady=12)
+        label(row, str(rank), app.fonts.caption, "text2", width=22, anchor="e").pack(side="left", padx=(0, 14))
         name = app.display_name(process.exe_path) if process.exe_path else process.app_name
-        box = tile(row, app, name, None, process.protected)
-        box.pack(side="left", padx=(0, 14), pady=2)
+        tile_box = tile(row, app, name, None, process.protected)
+        tile_box.pack(side="left", padx=(0, 16))
         if process.exe_path and app.settings["show_icons"]:
-            set_tile_icon(box, app.icon_for(process.exe_path, on_ready=lambda image, box=box: set_tile_icon(box, image)))
-        memory = ctk.CTkFrame(row, fg_color="transparent", width=170)
-        memory.pack(side="right", padx=(12, 4))
-        label(memory, format_memory(app.language, process.memory), app.fonts.body_bold, anchor="e").pack(fill="x")
-        bar = ctk.CTkProgressBar(memory, width=160, height=6, corner_radius=3, progress_color=ACCENT,
-                                 fg_color=C["inset"])
+            set_tile_icon(tile_box, app.icon_for(process.exe_path,
+                                                 on_ready=lambda image, b=tile_box: set_tile_icon(b, image)))
+        memory = ctk.CTkFrame(row, fg_color="transparent")
+        memory.pack(side="right", padx=(16, 0))
+        label(memory, format_memory(app.language, process.memory), app.fonts.body_strong, anchor="e").pack(fill="x")
+        bar = progress_bar(memory, width=160, height=4)
         bar.set(process.memory / largest)
-        bar.pack(pady=(4, 2))
+        bar.pack(pady=(6, 2))
         texts = ctk.CTkFrame(row, fg_color="transparent")
         texts.pack(side="left", fill="x", expand=True)
-        label(texts, name, app.fonts.name, "muted" if process.protected else "text").pack(fill="x")
-        meta = f"{process.name} · {app.t('pid', pid=process.pid)}"
+        line = ctk.CTkFrame(texts, fg_color="transparent")
+        line.pack(fill="x")
+        label(line, name, app.fonts.body_strong, "text2" if process.protected else "text").pack(side="left")
         if process.protected:
-            meta += f" · {app.t('background_windows')}"
-        label(texts, meta, app.fonts.small, "faint" if process.protected else "muted").pack(fill="x")
+            ctk.CTkLabel(line, text=app.t("protected_badge"), font=app.fonts.caption, height=20, corner_radius=4,
+                         fg_color=C["neutral_bg"], text_color=C["text2"], padx=6).pack(side="left", padx=(8, 0))
+        label(texts, f"{process.name} · {app.t('pid', pid=process.pid)}", app.fonts.caption, "text2").pack(fill="x")
 
 
 # ====================================================================== settings
 
-class SettingsPage(ctk.CTkFrame):
+class SettingsPage(Page):
     def __init__(self, app):
-        super().__init__(app, fg_color=C["bg"], corner_radius=0)
-        self.app = app
+        super().__init__(app)
         t, s = app.t, app.settings
         self.save_job = None
-        scroll = scroll_area(self)
-        scroll.pack(fill="both", expand=True, padx=(20, 8))
-        label(scroll, t("settings_title"), app.fonts.title).pack(fill="x", padx=8, pady=(22, 0))
-        label(scroll, t("settings_subtitle", path=settings_mod.data_dir()), app.fonts.body, "muted").pack(
-            fill="x", padx=8, pady=(2, 18))
-        grid = ctk.CTkFrame(scroll, fg_color="transparent")
-        grid.pack(fill="both", expand=True, padx=(8, 12))
-        grid.grid_columnconfigure((0, 1), weight=1, uniform="col")
+        scroll = self.scroll = scroll_area(self)
+        scroll.pack(fill="both", expand=True, padx=(PAD - 12, OVERHANG + 4), pady=(0, OVERHANG))
+        content = ctk.CTkFrame(scroll, fg_color="transparent")
+        content.pack(fill="both", expand=True, padx=(12, 20), pady=(28, 28))
+        label(content, t("settings_title"), app.fonts.title).pack(fill="x")
+        wrapping(label(content, t("settings_subtitle", path=settings_mod.data_dir()), app.fonts.body, "text2")).pack(
+            fill="x", pady=(2, 8))
 
-        display = self._section(grid, t("section_display"), 0, 0)
-        self._caption(display, t("language"))
+        # ---- display
+        section_header(content, app, t("section_display"))
         self.language_values = list(LANGUAGE_NAMES.items())
-        language = segmented(display, app, [name for _, name in self.language_values], self._on_language, fill=True)
+        _box, right, _ = settings_card(content, app, "globe", t("language"), t("language_hint"))
+        language = combo(right, app, [name for _, name in self.language_values], self._on_language)
         language.set(LANGUAGE_NAMES[s["language"]])
-        language.pack(fill="x", pady=(6, 16))
-        self._caption(display, t("theme"))
+        language.pack()
         self.theme_values = [(code, t(f"theme_{code}")) for code in settings_mod.THEMES]
-        theme = segmented(display, app, [name for _, name in self.theme_values], self._on_theme, fill=True)
+        _box, right, _ = settings_card(content, app, "color", t("theme"), t("theme_hint"))
+        theme = combo(right, app, [name for _, name in self.theme_values], self._on_theme)
         theme.set(dict(self.theme_values)[s["theme"]])
-        theme.pack(fill="x", pady=(6, 4))
+        theme.pack()
+        supported = app.mica_supported
+        _box, right, _ = settings_card(content, app, "transparency", t("mica"),
+                                       t("mica_hint") if supported else t("mica_unavailable"))
+        self._toggle(right, "mica", enabled=supported)
 
-        listing = self._section(grid, t("section_list"), 0, 1)
-        self._switch(listing, "group_by_app", t("group_by_app"), t("group_hint"))
-        self._switch(listing, "show_icons", t("show_icons"), t("icons_hint"))
-
-        closing = self._section(grid, t("section_closing"), 1, 0)
-        self._switch(closing, "confirm_before_terminate", t("confirm_before_terminate"), t("confirm_hint"))
-        self._switch(closing, "instant_force", t("instant_force"), t("instant_force_hint"))
-        line = ctk.CTkFrame(closing, fg_color="transparent")
-        line.pack(fill="x", pady=(12, 0))
-        label(line, t("close_timeout"), app.fonts.body).pack(side="left")
-        self.timeout_value = label(line, t("seconds_value", seconds=s["close_timeout"]), app.fonts.mono, anchor="e")
-        self.timeout_value.pack(side="right")
-        slider = ctk.CTkSlider(closing, from_=settings_mod.TIMEOUT_MIN, to=settings_mod.TIMEOUT_MAX,
+        # ---- closing
+        section_header(content, app, t("section_closing"))
+        self._switch_card(content, "check", "confirm_before_terminate", t("confirm_before_terminate"), t("confirm_hint"))
+        self._switch_card(content, "lightning", "instant_force", t("instant_force"), t("instant_force_hint"))
+        _box, right, _ = settings_card(content, app, "timer", t("close_timeout"), t("timeout_hint"))
+        self.timeout_value = label(right, t("seconds_value", seconds=s["close_timeout"]), app.fonts.body, width=44,
+                                   anchor="e")
+        self.timeout_value.pack(side="right", padx=(12, 0))
+        slider = ctk.CTkSlider(right, from_=settings_mod.TIMEOUT_MIN, to=settings_mod.TIMEOUT_MAX, width=200, height=20,
                                number_of_steps=settings_mod.TIMEOUT_MAX - settings_mod.TIMEOUT_MIN,
-                               command=self._on_timeout, progress_color=ACCENT, button_color=ACCENT,
-                               button_hover_color=ACCENT_HOVER, fg_color=C["border_strong"])
+                               command=self._on_timeout, progress_color=C["accent"], button_color=C["accent"],
+                               button_hover_color=C["accent_hover"], fg_color=C["control_strong"])
         slider.set(s["close_timeout"])
-        slider.pack(fill="x", pady=(10, 4))
-        label(closing, t("timeout_hint"), app.fonts.small, "muted").pack(fill="x")
+        slider.pack(side="right")
 
-        about = self._section(grid, t("section_about"), 1, 1)
-        facts = ctk.CTkFrame(about, fg_color="transparent")
-        facts.pack(fill="x")
-        facts.grid_columnconfigure(1, weight=1)
-        rows = ((t("version"), __version__), (t("rights"), t("rights_admin") if app.is_admin else t("rights_user")),
-                (t("log_file"), settings_mod.log_path().name))
-        for index, (name, value) in enumerate(rows):
-            label(facts, name, app.fonts.small, "muted").grid(row=index, column=0, sticky="w", pady=3, padx=(0, 24))
-            label(facts, value, app.fonts.small).grid(row=index, column=1, sticky="w", pady=3)
-        label(facts, t("project"), app.fonts.small, "muted").grid(row=len(rows), column=0, sticky="w", pady=3,
-                                                                  padx=(0, 24))
-        project = ctk.CTkLabel(facts, text=updater.PROJECT_PAGE.removeprefix("https://"), font=app.fonts.small,
-                               text_color=ACCENT, cursor="hand2", anchor="w")
-        project.grid(row=len(rows), column=1, sticky="w", pady=3)
-        project.bind("<Button-1>", lambda event: self._open_project())
-        buttons = ctk.CTkFrame(about, fg_color="transparent")
-        buttons.pack(fill="x", pady=(14, 0))
-        ghost_button(buttons, app, t("open_log"), lambda: app.show("log")).pack(side="left")
+        # ---- window list
+        section_header(content, app, t("section_list"))
+        self._switch_card(content, "list", "group_by_app", t("group_by_app"), t("group_hint"))
+        self._switch_card(content, "image", "show_icons", t("show_icons"), t("icons_hint"))
+
+        # ---- shortcut
+        section_header(content, app, t("section_shortcut"))
+        box, right, texts = settings_card(content, app, "link", t("shortcut_card"), t("shortcut_hint"))
+        self.pin_button = button(right, app, t("shortcut_pin"), self._pin_shortcut, icon="pin")
+        self.pin_button.pack(side="right")
+        button(right, app, t("shortcut_create"), self._create_shortcut).pack(side="right", padx=(0, 8))
+        self.shortcut_status = wrapping(label(texts, "", app.fonts.caption, "text2"))
+        self.shortcut_status.pack(fill="x", pady=(4, 0))
+        # Named in the language of its creation: look for every language's name, current first.
+        self.shortcut_file = shortcut.find_any([t("shortcut_name")] + [
+            texts_["shortcut_name"] for code, texts_ in TEXT.items() if code != app.language])
+        self._show_shortcut_status()
+
+        # ---- about
+        section_header(content, app, t("section_about"))
+        about = card(content)
+        about.pack(fill="x", pady=(0, 4))
+        head = ctk.CTkFrame(about, fg_color="transparent")
+        head.pack(fill="x", padx=16, pady=14)
+        logo = app.app_logo(32)
+        ctk.CTkLabel(head, text="", image=logo, width=32).pack(side="left", padx=(0, 14))
+        project = ctk.CTkLabel(head, text=updater.PROJECT_PAGE.removeprefix("https://"), font=app.fonts.body,
+                               text_color=C["link"], cursor="hand2", anchor="e")
+        project.pack(side="right")
+        project.bind("<Button-1>", lambda _e: self._open_project())
+        names = ctk.CTkFrame(head, fg_color="transparent")
+        names.pack(side="left", fill="x", expand=True)
+        label(names, "CloseAllPython", app.fonts.body_strong).pack(fill="x")
+        label(names, t("about_line", version=__version__), app.fonts.caption, "text2").pack(fill="x")
+
+        rights = t("rights_admin") if app.is_admin else t("rights_user")
+        row = self._about_row(about, t("rights_line", rights=rights))
         if not app.is_admin:
-            ghost_button(buttons, app, t("admin_restart"), app.restart_as_admin).pack(side="left", padx=(8, 0))
-        self._switch(about, "log_window_titles", t("log_window_titles"), t("log_window_titles_hint"))
-        updates = ctk.CTkFrame(about, fg_color="transparent")
-        updates.pack(fill="x", pady=(10, 0))
-        self._switch(updates, "auto_update", t("auto_update"), t("auto_update_hint"))
-        line = ctk.CTkFrame(updates, fg_color="transparent")
-        line.pack(fill="x", pady=(8, 0))
-        self.check_button = ghost_button(line, app, t("check_updates"), app.updates.check)
-        self.check_button.pack(side="left")
-        self.update_status = label(updates, "", app.fonts.small, "muted", wraplength=360)
-        self.update_status.pack(fill="x", pady=(8, 0))
+            button(row, app, t("admin_restart"), app.restart_as_admin, icon="shield").pack(side="right")
+        row = self._about_row(about, t("log_line", name=settings_mod.log_path().name))
+        button(row, app, t("open_log"), lambda: app.show("log")).pack(side="right")
+        row = self._about_row(about, t("log_window_titles"), t("log_window_titles_hint"))
+        self._toggle(row, "log_window_titles")
+        row = self._about_row(about, t("auto_update"), t("auto_update_hint"))
+        self._toggle(row, "auto_update")
+        self.check_button = button(row, app, t("check_updates"), app.updates.check, icon="sync")
+        self.check_button.pack(side="right", padx=(0, 16))
+        self.update_status = wrapping(label(row.texts, "", app.fonts.caption, "text2"))
+        self.update_status.pack(fill="x")
         app.updates.on_status = self._show_update_status
         self._show_update_status()
 
-        link = self._section(grid, t("section_shortcut"), 2, 0, columnspan=2)
-        label(link, t("shortcut_hint"), app.fonts.small, "muted", wraplength=640).pack(fill="x")
-        line = ctk.CTkFrame(link, fg_color="transparent")
-        line.pack(fill="x", pady=(12, 0))
-        ghost_button(line, app, t("shortcut_create"), self._create_shortcut).pack(side="left")
-        self.pin_button = ghost_button(line, app, t("shortcut_pin"), self._pin_shortcut)
-        self.pin_button.pack(side="left", padx=(8, 0))
-        self.shortcut_status = label(link, "", app.fonts.small, "muted", wraplength=640)
-        self.shortcut_status.pack(fill="x", pady=(8, 0))
-        # Named in the language of its creation: look for every language's name, current first.
-        self.shortcut_file = shortcut.find_any([t("shortcut_name")] + [
-            texts["shortcut_name"] for code, texts in TEXT.items() if code != app.language])
-        self._show_shortcut_status()
+    def _about_row(self, about, title, description=None):
+        divider(about).pack(fill="x", padx=1)
+        row = ctk.CTkFrame(about, fg_color="transparent")
+        row.pack(fill="x", padx=(62, 16), pady=10)
+        texts = ctk.CTkFrame(row, fg_color="transparent")
+        texts.pack(side="left", fill="x", expand=True)
+        label(texts, title, self.app.fonts.body).pack(fill="x")
+        if description:
+            wrapping(label(texts, description, self.app.fonts.caption, "text2")).pack(fill="x")
+        row.texts = texts
+        return row
+
+    def _toggle(self, master, key, enabled=True):
+        variable = ctk.BooleanVar(value=self.app.settings[key] and enabled)
+        toggle = Toggle(master, variable, lambda: self.app.update_settings(**{key: bool(variable.get())}))
+        if not enabled:
+            toggle.configure(state="disabled")
+        toggle.pack(side="right")
+        return toggle
+
+    def _switch_card(self, master, glyph, key, title, hint):
+        _box, right, _texts = settings_card(master, self.app, glyph, title, hint)
+        return self._toggle(right, key)
 
     def _open_project(self):
         import webbrowser
@@ -1197,7 +1440,11 @@ class SettingsPage(ctk.CTkFrame):
     def _show_shortcut_status(self):
         file = self.shortcut_file
         self.shortcut_status.configure(text=self.app.t("shortcut_ready", path=file) if file else "")
-        self.pin_button.configure(state="normal" if file else "disabled")
+        if file:
+            self.shortcut_status.pack(fill="x", pady=(4, 0))
+        else:
+            self.shortcut_status.pack_forget()
+        set_enabled(self.pin_button, bool(file))
 
     def _create_shortcut(self):
         t = self.app.t
@@ -1225,44 +1472,15 @@ class SettingsPage(ctk.CTkFrame):
     def _show_update_status(self):
         updates = self.app.updates
         try:
-            self.update_status.configure(text=updates.status_text())
-            self.check_button.configure(state="disabled" if updates.running or updates.installed else "normal")
+            text = updates.status_text()
+            self.update_status.configure(text=text)
+            if text:
+                self.update_status.pack(fill="x")
+            else:
+                self.update_status.pack_forget()
+            set_enabled(self.check_button, not (updates.running or updates.installed))
         except tk.TclError:
             pass   # page destroyed (language change): the new page registers itself
-
-    def _section(self, grid, title, row, column, columnspan=1):
-        box = ctk.CTkFrame(grid, fg_color=C["surface"], border_color=C["border"], border_width=1, corner_radius=12)
-        padx = (0, 0) if columnspan > 1 else (0 if column == 0 else 8, 8 if column == 0 else 0)
-        box.grid(row=row, column=column, columnspan=columnspan, sticky="nsew", padx=padx, pady=(0, 16))
-        inner = ctk.CTkFrame(box, fg_color="transparent")
-        inner.pack(fill="both", expand=True, padx=20, pady=18)
-        label(inner, title, self.app.fonts.h2).pack(fill="x", pady=(0, 12))
-        return inner
-
-    def _caption(self, master, text):
-        label(master, text, self.app.fonts.small, "muted").pack(fill="x")
-
-    def _switch(self, master, key, title, hint):
-        row = ctk.CTkFrame(master, fg_color="transparent")
-        row.pack(fill="x", pady=6)
-        variable = ctk.BooleanVar(value=self.app.settings[key])
-        toggle = switch(row, variable, lambda: self.app.update_settings(**{key: bool(variable.get())}), width=46)
-        toggle.pack(side="right", padx=(12, 0))
-        texts = ctk.CTkFrame(row, fg_color="transparent")
-        texts.pack(side="left", fill="x", expand=True)
-        title_label = label(texts, title, self.app.fonts.body)
-        title_label.pack(fill="x")
-        hint_label = label(texts, hint, self.app.fonts.small, "muted", wraplength=320)
-        hint_label.pack(fill="x")
-
-        def wrap(event):
-            # Long hints wrap to the column instead of being cut under the switch.
-            scaling = getattr(hint_label, "_get_widget_scaling", lambda: 1)() or 1
-            hint_label.configure(wraplength=max(120, int(event.width / scaling) - 4))
-
-        texts.bind("<Configure>", wrap, add="+")
-        for widget in (texts, title_label, hint_label):
-            widget.bind("<Button-1>", lambda _e: toggle.toggle())
 
     def _on_language(self, value):
         code = next(code for code, name in self.language_values if name == value)
@@ -1406,29 +1624,52 @@ class Updates:
 
 # ====================================================================== window
 
-class NavButton(ctk.CTkFrame):
+class NavItem(ctk.CTkFrame):
+    """A NavigationView item: icon and label; the selected one gets a fill and an accent mark."""
+
     def __init__(self, master, app, name, glyph, text):
-        super().__init__(master, fg_color="transparent", corner_radius=10, width=64, height=58)
-        self.app, self.name = app, name
+        super().__init__(master, fg_color="transparent", corner_radius=4, height=36)
+        self.app, self.name, self.active = app, name, False
         self.pack_propagate(False)
-        self.icon = ctk.CTkLabel(self, text=app.fonts.glyph(glyph), font=app.fonts.icon, text_color=C["muted"])
-        self.icon.pack(pady=(9, 0))
-        self.text = ctk.CTkLabel(self, text=text, font=app.fonts.tiny, text_color=C["muted"], height=14)
-        self.text.pack()
+        self.mark = ctk.CTkFrame(self, width=3, height=16, corner_radius=2, fg_color=C["accent"])
+        self.icon = glyph_label(self, app, glyph, 16, width=20)
+        self.icon.pack(side="left", padx=(14, 14))
+        self.text = label(self, text, app.fonts.body)
+        self.text.pack(side="left", fill="x", expand=True)
         for widget in (self, self.icon, self.text):
             widget.bind("<Button-1>", lambda _e: app.show(name))
+            widget.bind("<Enter>", lambda _e: self._hover(True))
+            widget.bind("<Leave>", lambda _e: self._hover(False))
+
+    def _hover(self, inside):
+        if not self.active:
+            self.configure(fg_color=C["nav_hover"] if inside else "transparent")
 
     def set_active(self, active):
-        self.configure(fg_color=C["rail_active"] if active else "transparent")
-        color = C["text"] if active else C["muted"]
-        self.icon.configure(text_color=color)
-        self.text.configure(text_color=color)
+        self.active = active
+        self.configure(fg_color=C["nav_selected"] if active else "transparent")
+        if active:
+            self.mark.place(x=0, rely=0.5, anchor="w")
+        else:
+            self.mark.place_forget()
+
+    def set_compact(self, compact):
+        if compact:
+            self.text.pack_forget()
+        else:
+            self.text.pack(side="left", fill="x", expand=True)
 
 
 class App(ctk.CTk):
     def __init__(self):
-        super().__init__(fg_color=C["bg"])
         self.settings = settings_mod.load_settings()
+        try:
+            self.mica_supported = bool(winapi.backdrop_supported())
+        except Exception:
+            self.mica_supported = False
+        self.mica = self.settings["mica"] and self.mica_supported
+        apply_palette(self.mica)
+        super().__init__(fg_color=C["bg"])
         core.log_titles = self.settings["log_window_titles"]
         ctk.set_appearance_mode(self.settings["theme"])
         self.is_admin = winapi.is_admin()
@@ -1442,18 +1683,26 @@ class App(ctk.CTk):
         self.callbacks = queue.Queue()
         self.busy = False
         self.current = "apps"
+        self.nav_compact = False
+        self.appearance = None        # theme the backdrop was last set for
+        self._logos = {}
         self.title(f"CloseAllPython {__version__}")
-        self.geometry("1040x700")
-        self.minsize(820, 560)
+        self.geometry("1180x740")
+        self.minsize(860, 580)
         try:
             self.iconbitmap(resource_path("app.ico"))
         except tk.TclError:
             pass
         self.window_icon = WindowIcon(self)   # replaces Tk's 16/32 px icons with sharp ones
         self.fonts = Fonts(self)
+        try:
+            windows_dir = winapi.windows_directory()
+        except Exception:
+            windows_dir = None
+        self.glyphs = Glyphs(windows_dir)
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
-        self.rail = None
+        self.nav_pane = None
         self.list_page = None
         self.updates = Updates(self)
         updater.cleanup()   # leftovers of an update installed by the previous run
@@ -1461,6 +1710,7 @@ class App(ctk.CTk):
         self.bind("<F5>", lambda _e: self.list_page.refresh() if self.current == "apps" else None)
         self.bind("<Control-f>", lambda _e: (self.show("apps"), self.list_page.focus_search()))
         self.after(POLL_MS, self._poll)
+        self.after(50, self.apply_backdrop)
         if self.settings["auto_update"] and updater.current_executable() is not None:
             self.after(UPDATE_STARTUP_DELAY_MS, lambda: self.updates.check(automatic=True))
 
@@ -1489,6 +1739,8 @@ class App(ctk.CTk):
                 callback()
             except Exception:
                 self.report_callback_exception(*sys.exc_info())
+        if self.mica and ctk.get_appearance_mode() != self.appearance:
+            self.apply_backdrop()   # Windows (or the setting) switched between light and dark
         self.after(POLL_MS, self._poll)
 
     def report_callback_exception(self, exc, value, tb):
@@ -1523,6 +1775,17 @@ class App(ctk.CTk):
                 log.debug("no description for %s", exe_path, exc_info=True)
             self.names[key] = shorten(name, 40) if name else ntpath.splitext(ntpath.basename(exe_path))[0]
         return self.names[key]
+
+    def app_logo(self, size):
+        """CloseAllPython's own icon as a CTkImage (None if the .ico cannot be read)."""
+        if size not in self._logos:
+            try:
+                picture = appicon.icon_image(resource_path("app.ico"), size * 2)
+                self._logos[size] = ctk.CTkImage(light_image=picture, dark_image=mica_image(picture),
+                                                 size=(size, size))
+            except Exception:
+                self._logos[size] = None
+        return self._logos[size]
 
     def icon_for(self, exe_path, on_ready=None):
         """CTkImage of an executable's icon if already extracted, else None.
@@ -1571,40 +1834,83 @@ class App(ctk.CTk):
         self.icon_pending.discard(key)
         image = None
         if picture is not None:
-            image = ctk.CTkImage(light_image=picture, dark_image=picture, size=(ICON_SIZE, ICON_SIZE))
+            image = ctk.CTkImage(light_image=picture, dark_image=mica_image(picture), size=(ICON_SIZE, ICON_SIZE))
         self.icon_cache[key] = image
         for callback in self.icon_waiters.pop(key, []):
             if image is not None:
                 callback(image)
 
+    # ---------------------------------------------------------------- Mica
+    def apply_backdrop(self, window=None):
+        """Mica behind `window` (default: this one) in the dark theme, opaque otherwise.
+
+        Under Mica every dark colour was converted for the backdrop (gui_theme.apply_palette): if
+        Windows refuses the backdrop, the palette goes back to plain colours and the window is
+        rebuilt, so it never shows those converted colours alone.
+        """
+        if not self.mica:
+            return
+        dark = ctk.get_appearance_mode() == "Dark"
+        targets = [window] if window is not None else [self] + [w for w in self.winfo_children()
+                                                                 if isinstance(w, Dialog)]
+        if window is None:
+            self.appearance = ctk.get_appearance_mode()
+        for target in targets:
+            try:
+                ok = winapi.set_backdrop(int(target.wm_frame(), 16), dark)
+            except Exception:
+                log.debug("backdrop failed", exc_info=True)
+                ok = False
+            if not ok and dark and target is self:
+                log.info("Mica refused by Windows: plain colours")
+                self.mica = False
+                self.mica_supported = False
+                self.after(10, self.build)
+                return
+
     # ---------------------------------------------------------------- layout
     def build(self):
         state = self.list_page.state() if self.list_page is not None else None
-        if self.rail is not None:
-            self.rail.destroy()
-            for page in self.pages.values():
-                page.destroy()
-        self.rail = ctk.CTkFrame(self, fg_color=C["rail"], corner_radius=0, width=80)
-        self.rail.grid(row=0, column=0, sticky="ns")
-        self.rail.grid_propagate(False)
+        if self.nav_pane is not None:
+            self.nav_pane.destroy()
+            self.content.destroy()
+        apply_palette(self.mica)
+        self.icon_cache.clear()
+        self.glyphs.cache.clear()
+        self._logos.clear()
+        self.configure(fg_color=C["bg"])
+        t = self.t
+        self.nav_pane = ctk.CTkFrame(self, fg_color=C["bg"], corner_radius=0,
+                                     width=NAV_COMPACT_WIDTH if self.nav_compact else NAV_WIDTH)
+        self.nav_pane.grid(row=0, column=0, sticky="ns")
+        self.nav_pane.pack_propagate(False)
+        toggle = icon_button(self.nav_pane, self, "menu", self.toggle_nav, size=36)
+        toggle.pack(anchor="w", padx=(8, 0), pady=(4, 6))
         self.nav = {
-            "apps": NavButton(self.rail, self, "apps", "apps", self.t("nav_apps")),
-            "background": NavButton(self.rail, self, "background", "memory", self.t("nav_background")),
-            "log": NavButton(self.rail, self, "log", "log", self.t("nav_log")),
-            "settings": NavButton(self.rail, self, "settings", "settings", self.t("nav_settings")),
+            "apps": NavItem(self.nav_pane, self, "apps", "apps", t("nav_apps")),
+            "background": NavItem(self.nav_pane, self, "background", "memory", t("nav_background")),
+            "log": NavItem(self.nav_pane, self, "log", "log", t("nav_log")),
+            "settings": NavItem(self.nav_pane, self, "settings", "settings", t("nav_settings")),
         }
-        self.nav["apps"].pack(pady=(14, 4))
-        self.nav["background"].pack(pady=4)
-        self.nav["log"].pack(pady=4)
-        self.nav["settings"].pack(side="bottom", pady=14)
+        for name in ("apps", "background", "log"):
+            self.nav[name].pack(fill="x", padx=(4, 8), pady=2)
+        self.nav["settings"].pack(side="bottom", fill="x", padx=(4, 8), pady=(2, 10))
+        for item in self.nav.values():
+            item.set_compact(self.nav_compact)
+        self.content = ctk.CTkFrame(self, fg_color=C["bg"], corner_radius=0)
+        self.content.grid(row=0, column=1, sticky="nsew")
         self.list_page = ListPage(self, state)
         self.pages = {"apps": self.list_page, "closing": ClosingPage(self), "background": BackgroundPage(self),
-                      "log": LogPage(self),
-                      "settings": SettingsPage(self)}
-        for page in self.pages.values():
-            page.grid(row=0, column=1, sticky="nsew")
+                      "log": LogPage(self), "settings": SettingsPage(self)}
         self.list_page.refresh()
         self.show(self.current if self.current != "closing" else "apps")
+        self.appearance = None   # set the backdrop again for the new colours
+
+    def toggle_nav(self):
+        self.nav_compact = not self.nav_compact
+        self.nav_pane.configure(width=NAV_COMPACT_WIDTH if self.nav_compact else NAV_WIDTH)
+        for item in self.nav.values():
+            item.set_compact(self.nav_compact)
 
     def show(self, name):
         if self.busy and name != "closing":
@@ -1615,8 +1921,8 @@ class App(ctk.CTk):
         elif name == "background":
             self.pages["background"].load()
         self.pages[name].tkraise()
-        for key, button in self.nav.items():
-            button.set_active(key == name or (name == "closing" and key == "apps"))
+        for key, item in self.nav.items():
+            item.set_active(key == name or (name == "closing" and key == "apps"))
 
     def set_busy(self, busy):
         self.busy = busy
@@ -1638,13 +1944,21 @@ class App(ctk.CTk):
         core.log_titles = new["log_window_titles"]
         if new["theme"] != old["theme"]:
             ctk.set_appearance_mode(new["theme"])
-        if new["language"] != old["language"]:
+        mica = new["mica"] and self.mica_supported
+        if new["language"] != old["language"] or mica != self.mica:
+            if mica != self.mica:
+                self.mica = mica
+                if not mica:   # back to an opaque window before the plain colours arrive
+                    try:
+                        winapi.set_backdrop(int(self.wm_frame(), 16), False)
+                    except Exception:
+                        log.debug("backdrop reset failed", exc_info=True)
             # Rebuilt after the current callback returns: the settings page is replaced too.
             self.after(10, self.build)
             return
         if new["group_by_app"] != old["group_by_app"] or new["show_icons"] != old["show_icons"]:
             self.list_page.refresh(rebuild=True)
-        elif new["close_timeout"] != old["close_timeout"]:
+        elif new["close_timeout"] != old["close_timeout"] or new["instant_force"] != old["instant_force"]:
             self.list_page.update_counts()
 
     def restart_as_admin(self):
