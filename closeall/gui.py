@@ -996,7 +996,7 @@ class ClosingPage(Page):
         self.title.pack(fill="x")
         self.subtitle = label(texts, "", app.fonts.body, "text2")
         self.subtitle.pack(fill="x", pady=(2, 0))
-        self.elapsed = label(line, "", app.fonts.mono, "text2")
+        self.elapsed = label(line, "", app.fonts.caption, "text2")
         self.elapsed.pack(side="right", anchor="s")
         self.progress = progress_bar(self, height=4)
         self.progress.grid(row=1, column=0, sticky="ew", padx=(PAD, PAD_RIGHT), pady=(16, 16))

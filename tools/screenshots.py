@@ -174,6 +174,11 @@ def child(name, language, theme, scene, out_dir):
     app.focus_force()
     hwnd = int(app.wm_frame(), 16)
     ctypes.windll.user32.SetForegroundWindow(hwnd)
+    pump(0.5)
+    for dialog in (w for w in app.winfo_children() if isinstance(w, gui.Dialog)):
+        dialog.attributes("-topmost", True)   # above the main window, which is topmost too
+        dialog.lift()
+        dialog.focus_force()
     pump(2.5)
     box = frame_bounds(hwnd)
     ImageGrab.grab(all_screens=True).crop(box).save(os.path.join(out_dir, f"{name}.png"))
