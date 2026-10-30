@@ -215,11 +215,28 @@ def self_test_checks():
         winapi.current_session()
 
     def icons():
-        from . import gui_theme, winapi
-        glyphs = gui_theme.Glyphs(winapi.windows_directory())
-        if not glyphs.path:
+        # Qt starts with its bundled Windows platform plugin (no window is shown) and draws an
+        # icon with the Windows icon font.
+        from PySide6.QtCore import QRectF, Qt
+        from PySide6.QtGui import QColor, QFont, QFontDatabase, QGuiApplication, QImage, QPainter
+
+        from . import gui_theme
+        app = QGuiApplication.instance() or QGuiApplication(sys.argv[:1])
+        family = next((name for name in gui_theme.ICON_FAMILIES if name in QFontDatabase.families()), None)
+        if family is None:
             raise RuntimeError("the Windows icon font (Segoe Fluent Icons / Segoe MDL2 Assets) was not found")
-        glyphs._draw(gui_theme.GLYPHS["apps"][0], 16, "#000000", glyphs.path)
+        image = QImage(32, 32, QImage.Format.Format_ARGB32)
+        image.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(image)
+        font = QFont(family)
+        font.setPixelSize(24)
+        painter.setFont(font)
+        painter.setPen(QColor("#000000"))
+        painter.drawText(QRectF(0, 0, 32, 32), Qt.AlignmentFlag.AlignCenter, gui_theme.GLYPHS["apps"][0])
+        painter.end()
+        if not any(image.pixelColor(x, y).alpha() for x in range(32) for y in range(32)):
+            raise RuntimeError(f"{family} drew nothing")
+        del app
 
     def folders():
         from . import winapi

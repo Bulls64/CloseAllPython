@@ -1,7 +1,7 @@
-"""Smoke test of the interface: the real window, every page, on the fake Windows of the tests.
+"""Smoke test of the interface: the real Qt window, every page, on the fake Windows of the tests.
 
-Skipped where Tk cannot open a window (no display) or CustomTkinter is not installed, except on
-GitHub Actions: there it must run, so a runner without a display fails instead of skipping.
+Skipped where PySide6 is not installed, except on GitHub Actions: there it must run. Without a
+display (Linux), Qt draws offscreen.
 """
 import os
 import shutil
@@ -14,16 +14,18 @@ from unittest import mock
 from tests import fakewin  # installs the fake winapi before closeall.core is imported
 from tests.test_core import ME
 
+if sys.platform != "win32" and not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
 try:
-    import customtkinter  # noqa: F401
-    import tkinter
-    tkinter.Tk().destroy()
-    DISPLAY = True
-except Exception:   # no CustomTkinter, or no display to open a window on
-    DISPLAY = False
+    from PySide6.QtCore import QEvent
+    from PySide6.QtWidgets import QApplication, QLabel, QPushButton
+    QT = True
+except ImportError:
+    QT = False
 
 
-@unittest.skipUnless(DISPLAY or os.environ.get("GITHUB_ACTIONS") == "true", "needs CustomTkinter and a display")
+@unittest.skipUnless(QT or os.environ.get("GITHUB_ACTIONS") == "true", "needs PySide6")
 class InterfaceSmokeTests(unittest.TestCase):
     def setUp(self):
         self.data = tempfile.mkdtemp()
@@ -47,51 +49,78 @@ class InterfaceSmokeTests(unittest.TestCase):
         gui.core.winapi = module
         self.addCleanup(setattr, gui.core, "log_titles", gui.core.log_titles)
         settings.save_settings({"language": "fr", "theme": "dark"})
-        self.app = gui.App()
-        self.addCleanup(self.close_app)
+        self.app = self.open_app()
 
-    def close_app(self):
+    def open_app(self):
+        app = self.gui.App()
+        app.show()
+        self.addCleanup(self.close_app, app)
+        self.pump(0.2, app=app)
+        return app
+
+    def close_app(self, app):
         try:
-            self.app.destroy()
-        except Exception:
+            app.hide()
+            app.deleteLater()
+            QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        except RuntimeError:
             pass
 
-    def pump(self, seconds=0.3, until=None):
+    def pump(self, seconds=0.3, until=None, app=None):
         end = time.monotonic() + seconds
         while time.monotonic() < end:
-            self.app.update()
+            QApplication.processEvents()
             if until and until():
                 return True
             time.sleep(0.01)
         return until() if until else True
 
-    def labels(self, widget):
-        found = []
-        for child in widget.winfo_children():
-            if isinstance(child, self.gui.ctk.CTkLabel):
-                found.append(child.cget("text"))
-            found += self.labels(child)
-        return found
+    @staticmethod
+    def texts(widget):
+        return [w.text() for w in widget.findChildren(QLabel) + widget.findChildren(QPushButton)]
 
     def dialogs(self):
-        return [w for w in self.app.winfo_children() if isinstance(w, self.gui.Dialog)]
+        return [d for d in self.app.findChildren(self.gui.Dialog) if d.isVisible()]
 
     def test_every_page_opens(self):
-        self.pump()
-        entries = self.app.list_page.entries if hasattr(self.app.list_page, "entries") else None
-        self.assertIn("notepad", " ".join(self.labels(self.app.list_page)).lower(), entries)
-        self.app.show("background")
+        self.assertIn("notepad", " ".join(self.texts(self.app.list_page)).lower())
+        self.app.show_page("background")
         page = self.app.pages["background"]
         self.assertTrue(self.pump(5, until=lambda: page.report is not None), "background list never loaded")
         self.assertIn("sync.exe", [p.name for p in page.report.top])
-        self.app.show("log")
-        self.app.show("settings")
-        texts = self.labels(self.app.pages["settings"])
+        self.app.show_page("log")
+        self.app.show_page("settings")
+        texts = self.texts(self.app.pages["settings"])
         self.assertIn("github.com/Bulls64/CloseAllPython", texts)
         self.assertTrue(any(self.gui.__version__ in text for text in texts), texts)
 
+    def test_select_and_close(self):
+        page = self.app.list_page
+        [card] = [c for c in page.cards.values() if c.entry.name == "notepad"]
+        card.check.click()
+        self.assertEqual(len(page.selected), 1)
+        self.assertTrue(page.close_button.isEnabled())
+        page.close_selected()
+        [dialog] = self.dialogs()
+        self.assertIn("notepad — 1 fenêtre", " ".join(self.texts(dialog)))
+        dialog._confirm()
+        closing = self.app.pages["closing"]
+        self.assertTrue(self.pump(5, until=lambda: not closing.running), "closing never finished")
+        self.assertIn(("wait", 2208), self.system.calls)
+        closing.finish()
+        self.assertEqual(self.app.current, "apps")
+
+    def test_search_filters_the_list(self):
+        page = self.app.list_page
+        page.search.setText("zzz")
+        page.apply_filter()
+        self.assertTrue(page.empty.isVisible())
+        self.assertIn("zzz", page.empty.text())
+        page.search.setText("note")
+        page.apply_filter()
+        self.assertFalse(page.empty.isVisible())
+
     def test_log_lines_without_titles(self):
-        self.pump()
         old = "2026-10-20 10:00:00,1 INFO closed pid=12 exe=C:\\Windows\\notepad.exe titles=['notes.txt - Notepad']"
         new = "2026-10-24 10:00:00,1 INFO closed pid=12 exe=C:\\Windows\\notepad.exe windows=2 titles=[]"
         self.assertIn("notes.txt - Notepad", self.gui.format_log_line(self.app, old))
@@ -102,52 +131,73 @@ class InterfaceSmokeTests(unittest.TestCase):
         self.assertFalse(self.gui.core.log_titles)
 
     def test_restart_as_admin_warns_outside_program_files(self):
-        self.pump()
         self.system.elevation = [r"C:\Users\me\Downloads\CloseAllPython.exe"]
-        with mock.patch.object(self.app, "destroy") as destroy:
+        with mock.patch.object(self.app, "close") as close:
             self.app.restart_as_admin()
-            self.pump()
             [dialog] = self.dialogs()
-            self.assertIn(r"C:\Users\me\Downloads", " ".join(self.labels(dialog)))
+            self.assertIn(r"C:\Users\me\Downloads", " ".join(self.texts(dialog)))
             self.assertNotIn(("relaunch_as_admin",), self.system.calls)
             dialog.destroy()
+            self.assertEqual(self.app.dialogs, 0)
             self.system.elevation = [r"C:\Program Files\CloseAllPython\CloseAllPython.exe"]
             self.app.restart_as_admin()
             self.assertIn(("relaunch_as_admin",), self.system.calls)
-            destroy.assert_called_once()
+            close.assert_called_once()
 
-    def test_mica_backdrop_follows_the_theme_and_the_setting(self):
-        self.app.destroy()
+    def test_language_change_rebuilds_the_window(self):
+        self.app.show_page("settings")
+        self.app.update_settings(language="en")
+        self.pump(0.3)
+        self.assertIn("Settings", self.texts(self.app.pages["settings"]))
+        self.assertEqual(self.app.current, "settings")
+
+    def test_theme_change_restyles_without_rebuilding(self):
+        page = self.app.list_page
+        self.assertTrue(self.gui.THEME.dark)
+        self.app.update_settings(theme="light")
+        self.assertFalse(self.gui.THEME.dark)
+        self.assertIs(self.app.list_page, page)
+        self.assertIn(("dark_title_bar", False), self.system.calls)
+
+    def test_mica_follows_the_setting_in_both_themes(self):
         self.system.mica = True
-        self.settings.save_settings({"language": "fr", "theme": "dark"})
-        self.app = self.gui.App()
-        self.pump(0.5)
+        self.app = self.open_app()
         self.assertTrue(self.app.mica)
-        self.assertEqual(self.gui.C["bg"][1], "#000000")   # dark colours converted for Mica
+        self.assertEqual(self.gui.THEME["window"], "transparent")
         self.assertIn(("set_backdrop", True), self.system.calls)
         self.system.calls.clear()
         self.app.update_settings(theme="light")
-        self.pump(0.5)
-        self.assertIn(("set_backdrop", False), self.system.calls)   # light theme: opaque
+        self.assertTrue(self.app.mica)   # Mica in the light theme too
+        self.assertIn(("set_backdrop", True), self.system.calls)
         self.app.update_settings(mica=False)
-        self.pump(0.5)
         self.assertFalse(self.app.mica)
-        self.assertNotEqual(self.gui.C["bg"][1], "#000000")   # plain colours again
-        self.app.show("settings")
-        self.assertIn("Effet de transparence (Mica)", self.labels(self.app.pages["settings"]))
+        self.assertIn(("set_backdrop", False), self.system.calls)
+        self.assertEqual(self.gui.THEME["window"], "#f3f3f3")   # opaque again
+        self.app.show_page("settings")
+        self.assertIn("Effet de transparence (Mica)", self.texts(self.app.pages["settings"]))
 
-    def test_mica_refused_falls_back_to_plain_colours(self):
-        self.app.destroy()
+    def test_mica_refused_falls_back_to_an_opaque_window(self):
         self.system.mica = True
-        self.settings.save_settings({"language": "fr", "theme": "dark"})
         sys.modules["closeall.winapi"].set_backdrop = lambda hwnd, mica: False
-        self.app = self.gui.App()
-        self.pump(0.8)
+        self.app = self.open_app()
         self.assertFalse(self.app.mica)
-        self.assertNotEqual(self.gui.C["bg"][1], "#000000")
+        self.assertEqual(self.gui.THEME["window"], "#202020")
+
+    def test_without_mica_the_window_is_opaque(self):
+        self.assertFalse(self.app.mica)
+        self.assertFalse(self.app.translucent)
+        self.assertEqual(self.gui.THEME["window"], "#202020")
+        self.assertNotIn(("set_backdrop", True), self.system.calls)
+
+    def test_worker_threads_hand_back_to_the_interface(self):
+        import threading
+
+        done = []
+        threading.Thread(target=lambda: self.app.call_soon(lambda: done.append(threading.current_thread()))).start()
+        self.assertTrue(self.pump(2, until=lambda: done))
+        self.assertIs(done[0], threading.main_thread())
 
     def test_update_errors_are_readable(self):
-        self.pump()
         updates = self.app.updates
         updates.status = ("update_failed", {"error": ("update_err_rate_limit", {"time": "15:42"})})
         self.assertIn("15:42", updates.status_text())

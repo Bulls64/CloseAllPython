@@ -1,31 +1,41 @@
-"""CustomTkinter user interface in the Windows 11 Fluent style: navigation pane, application
-list, closing screen, background processes, log and settings."""
+"""Qt (PySide6) user interface in the Windows 11 Fluent style: navigation pane, application list,
+closing screen, background processes, log and settings.
+
+Qt draws the whole window at once with real transparency: on Windows 11 22H2 and later the
+window shows the Mica backdrop (light and dark themes) and every WinUI colour, most of them
+translucent, is drawn over it as in WinUI applications.
+"""
 import ast
 import logging
 import ntpath
 import os
-import queue
 import re
 import sys
 import threading
 import time
-import tkinter as tk
+import weakref
 from dataclasses import dataclass, field
 
-import customtkinter as ctk
+from PySide6.QtCore import (QEvent, QLibraryInfo, QObject, QRectF, QSize, Qt, QTimer, QTranslator, QVariantAnimation,
+                            Signal)
+from PySide6.QtGui import (QColor, QFont, QFontDatabase, QFontMetrics, QGuiApplication, QIcon, QImage, QKeySequence,
+                           QPainter, QPen, QPixmap, QShortcut)
+from PySide6.QtWidgets import (QAbstractButton, QApplication, QButtonGroup, QCheckBox, QComboBox, QFrame,
+                               QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMenu,
+                               QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QSlider,
+                               QStackedWidget, QVBoxLayout, QWidget)
 
-from . import __version__, appicon, core, crash, settings as settings_mod, shortcut, updater, winapi
-from .gui_theme import C, Fonts, Glyphs, apply_palette, mica_image, tile_color, tile_letter
+from . import __version__, core, crash, settings as settings_mod, shortcut, updater, winapi
+from .gui_theme import ICON_FAMILIES, Theme, accent_shades, parse_rgba, tile_color, tile_letter
 from .i18n import LANGUAGE_NAMES, TEXT, format_memory, format_seconds, translate, translate_n
 
 log = logging.getLogger(settings_mod.LOGGER_NAME)
 
-POLL_MS = 80
 SEARCH_DELAY_MS = 120
 MAX_DIALOG_ITEMS = 12
 MAX_TITLE = 110
-ICON_SIZE = 24          # logical px; CustomTkinter scales it with the screen DPI
-ICON_SOURCE_SIZE = 48   # rendered size, sharp up to 200 % scaling
+ICON_SIZE = 24          # logical px
+ICON_SOURCE_SIZE = 48   # extracted size, sharp up to 200 % scaling
 LOG_LINES = 400
 NOTICE_MS = 4000
 # Automatic refreshes after closing applications: at once, then a few more for windows that
@@ -35,13 +45,11 @@ AFTER_CLOSE_REFRESH_MS = (0, 400, 1200, 3000)
 EXPLORER_REFRESH_MS = (700, 2000)
 RETRY_REFRESH_MS = 150
 UPDATE_STARTUP_DELAY_MS = 2000   # the automatic check waits until the window is up
+NAV_WIDTH, NAV_COMPACT_WIDTH = 248, 48
+PAD = 36                          # page margins
 
-NAV_WIDTH, NAV_COMPACT_WIDTH = 248, 52
-# The content layer is larger than its area by OVERHANG on the right and at the bottom, so that
-# only its top-left corner shows rounded, as in WinUI's NavigationView.
-OVERHANG = 16
-PAD = 36                 # page margins
-PAD_RIGHT = PAD + OVERHANG
+THEME = Theme(dark=False, mica=False)
+_ICONS = weakref.WeakKeyDictionary()   # buttons with a glyph icon -> (glyph, colour token)
 
 
 def resource_path(name):
@@ -49,369 +57,547 @@ def resource_path(name):
     return os.path.join(base, name)
 
 
-class WindowIcon:
-    """Crisp title-bar and taskbar icons for a Tk window, at the DPI of its monitor.
-
-    Tk's `wm iconbitmap` always uses the 16 and 32 px images of the .ico, so they are enlarged,
-    hence blurry, on scaled displays. The icons are given again whenever the window is shown or
-    moves to a monitor with another scaling.
-    """
-
-    def __init__(self, window):
-        self.window, self.dpi, self.handles = window, None, ()
-        # A toplevel's bindings also receive its child widgets' events: keep only its own.
-        window.bind("<Map>", lambda e: e.widget is window and self.apply(force=True), add="+")
-        window.bind("<Configure>", lambda e: e.widget is window and self.apply(), add="+")
-        window.after(250, lambda: self.apply(force=True))  # after CustomTkinter's own icon setup
-
-    def apply(self, force=False):
-        try:
-            hwnd = int(self.window.wm_frame(), 16)
-            dpi = winapi.window_dpi(hwnd)
-            if dpi == self.dpi and not force:
-                return
-            big_size, small_size = appicon.icon_sizes(dpi)
-            path = resource_path("app.ico")
-            big = winapi.icon_from_image(appicon.icon_image(path, big_size))
-            small = winapi.icon_from_image(appicon.icon_image(path, small_size))
-        except Exception:  # an icon is cosmetic: never let it break the window
-            log.debug("window icon failed", exc_info=True)
-            return
-        winapi.set_window_icons(hwnd, big, small)
-        for old in self.handles:   # ours from the previous DPI; Tk's own are left alone
-            winapi.destroy_icon(old)
-        self.handles, self.dpi = (big, small), dpi
-
-
 def shorten(text, limit=MAX_TITLE):
     return text if len(text) <= limit else text[:limit - 1] + "…"
 
 
-def scaled(widget, value):
-    try:
-        return round(value * widget._get_widget_scaling())
-    except Exception:
-        return value
+# ====================================================================== drawing helpers
+
+def qcolor(token):
+    """QColor of a theme token (or of a literal colour)."""
+    value = THEME.tokens.get(token, token)
+    return QColor(*parse_rgba(value))
+
+
+def glyph_font(pixel_size):
+    font = QFont(THEME.icon_font or THEME.ui_font)
+    font.setPixelSize(pixel_size)
+    return font
+
+
+def glyph_pixmap(name, token="text", size=16):
+    ratio = 2.0
+    screen = QGuiApplication.primaryScreen()
+    if screen is not None:
+        ratio = max(1.0, min(3.0, screen.devicePixelRatio()))
+    pixmap = QPixmap(int(size * ratio), int(size * ratio))
+    pixmap.setDevicePixelRatio(ratio)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+    painter.setPen(qcolor(token))
+    painter.setFont(glyph_font(size))
+    painter.drawText(QRectF(0, 0, size, size), Qt.AlignmentFlag.AlignCenter, THEME.glyph(name))
+    painter.end()
+    return pixmap
+
+
+def set_glyph(button, name, token="text"):
+    """Give a button a glyph icon, redrawn when the theme changes."""
+    _ICONS[button] = (name, token)
+    button.setIcon(QIcon(glyph_pixmap(name, token)))
+    button.setIconSize(QSize(16, 16))
+
+
+def refresh_glyphs():
+    for button, (name, token) in list(_ICONS.items()):
+        try:
+            button.setIcon(QIcon(glyph_pixmap(name, token)))
+        except RuntimeError:   # the widget is gone
+            _ICONS.pop(button, None)
+
+
+def repolish(widget):
+    widget.style().unpolish(widget)
+    widget.style().polish(widget)
+    widget.update()
+
+
+def set_prop(widget, name, value):
+    widget.setProperty(name, value)
+    repolish(widget)
+
+
+def label(text="", role=None, tone=None, wrap=False):
+    widget = QLabel(text)
+    if role:
+        widget.setProperty("role", role)
+    if tone:
+        widget.setProperty("tone", tone)
+    widget.setWordWrap(wrap)
+    widget.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+    return widget
+
+
+def glyph_label(name, size=16, tone=None):
+    widget = label(THEME.glyph(name), {16: "glyph", 20: "glyph20", 12: "glyph12"}[size], tone)
+    widget.setFixedWidth(size + 4)
+    widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    return widget
+
+
+def button(text, on_click=None, kind="standard", icon=None):
+    widget = QPushButton(text)
+    widget.setProperty("kind", kind)
+    if icon:
+        set_glyph(widget, icon, "on_accent" if kind == "accent" else "text")
+    if on_click is not None:
+        widget.clicked.connect(lambda _checked=False: on_click())
+    return widget
+
+
+def icon_button(name, on_click=None, kind="subtle", tooltip=None):
+    widget = button("", on_click, kind, name)
+    widget.setProperty("shape", "icon")
+    widget.setFixedSize(32, 32)
+    if tooltip:
+        widget.setToolTip(tooltip)
+    return widget
+
+
+def hbox(margins=(0, 0, 0, 0), spacing=0):
+    layout = QHBoxLayout()
+    layout.setContentsMargins(*margins)
+    layout.setSpacing(spacing)
+    return layout
+
+
+def vbox(margins=(0, 0, 0, 0), spacing=0):
+    layout = QVBoxLayout()
+    layout.setContentsMargins(*margins)
+    layout.setSpacing(spacing)
+    return layout
+
+
+def card(kind="default", hover=False):
+    frame = QFrame()
+    frame.setProperty("card", kind)
+    if hover:
+        frame.setProperty("hover", "true")
+        frame.setAttribute(Qt.WidgetAttribute.WA_Hover)
+    return frame
+
+
+def divider():
+    line = QFrame()
+    line.setProperty("divider", "true")
+    line.setFixedHeight(1)
+    return line
+
+
+def scroll_area():
+    """A transparent scroll area and the widget to fill (with a vertical layout)."""
+    area = QScrollArea()
+    area.setWidgetResizable(True)
+    area.setFrameShape(QFrame.Shape.NoFrame)
+    area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    area.viewport().setAutoFillBackground(False)   # a style sheet here would override the cards'
+    content = QWidget()
+    content.setObjectName("scrollContent")
+    content.setLayout(vbox())
+    area.setWidget(content)
+    return area, content
+
+
+class Painted:
+    """Mixin for the widgets drawn by hand: they are repainted when the theme changes."""
 
 
 # ====================================================================== Fluent controls
 
-def label(master, text="", font=None, color="text", **kwargs):
-    kwargs.setdefault("anchor", "w")
-    kwargs.setdefault("justify", "left")
-    return ctk.CTkLabel(master, text=text, font=font, text_color=C[color], **kwargs)
+class CheckBox(QCheckBox, Painted):
+    """WinUI CheckBox (the box only)."""
+
+    def __init__(self):
+        super().__init__()
+        self.setFixedSize(20, 20)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover)
+
+    def hitButton(self, pos):
+        return self.rect().contains(pos)
+
+    def paintEvent(self, _event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        rect = QRectF(0.5, 0.5, 19, 19)
+        hover = self.underMouse()
+        if self.isChecked():
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(qcolor("accent_hover" if hover else "accent"))
+            painter.drawRoundedRect(rect, 4, 4)
+            pen = QPen(qcolor("on_accent"), 1.6)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            painter.setPen(pen)
+            painter.drawPolyline([QRectF(5.2, 10.2, 0, 0).topLeft(), QRectF(8.4, 13.4, 0, 0).topLeft(),
+                                  QRectF(14.8, 6.8, 0, 0).topLeft()])
+        else:
+            painter.setPen(QPen(qcolor("control_strong"), 1))
+            painter.setBrush(qcolor("subtle_hover" if hover else "control_alt"))
+            painter.drawRoundedRect(rect, 4, 4)
+        painter.end()
 
 
-def wrapping(widget, minimum=120):
-    """Make a label wrap to the width its parent gives it (long translations, narrow windows)."""
-    parent = widget.master
+class Toggle(QCheckBox, Painted):
+    """WinUI ToggleSwitch: outlined when off, accent with a contrasting knob when on (animated)."""
 
-    def wrap(event):
-        width = max(minimum, int(event.width / (scaled(widget, 100) / 100 or 1)) - 4)
-        if widget.cget("wraplength") != width:
-            widget.configure(wraplength=width)
+    def __init__(self, checked=False):
+        super().__init__()
+        self.setFixedSize(40, 20)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover)
+        self.setChecked(checked)
+        self._position = 1.0 if checked else 0.0
+        self._animation = QVariantAnimation(self)
+        self._animation.setDuration(120)
+        self._animation.valueChanged.connect(self._moved)
+        self.toggled.connect(self._animate)
 
-    parent.bind("<Configure>", wrap, add="+")
-    return widget
+    def hitButton(self, pos):
+        return self.rect().contains(pos)
 
+    def _moved(self, value):
+        self._position = float(value)
+        self.update()
 
-BUTTON_STYLES = {
-    "standard": dict(fg="control", hover="control_hover", text="text", border="control_border", border_width=1),
-    "accent": dict(fg="accent", hover="accent_hover", text="on_accent", border="accent", border_width=0),
-    "subtle": dict(fg=None, hover="subtle_hover", text="text", border=None, border_width=0),
-}
+    def _animate(self, checked):
+        self._animation.stop()
+        self._animation.setStartValue(self._position)
+        self._animation.setEndValue(1.0 if checked else 0.0)
+        self._animation.start()
 
-
-def button(master, app, text, command, icon=None, style="standard", height=32, **kwargs):
-    """A WinUI Button: standard (neutral), accent (main action) or subtle (no background)."""
-    spec = BUTTON_STYLES[style]
-    image = app.glyphs.image(icon, 16, spec["text"]) if icon else None
-    widget = ctk.CTkButton(master, text=text, command=command, image=image, compound="left", height=height,
-                           corner_radius=4, border_width=spec["border_width"],
-                           border_color=C[spec["border"]] if spec["border"] else None,
-                           fg_color=C[spec["fg"]] if spec["fg"] else "transparent", hover_color=C[spec["hover"]],
-                           text_color=C[spec["text"]], text_color_disabled=C["text_disabled"],
-                           font=kwargs.pop("font", app.fonts.body), **kwargs)
-    widget.fluent_style = style
-    return widget
-
-
-def set_enabled(widget, enabled):
-    """Enable or disable a button with WinUI's disabled colours."""
-    style = getattr(widget, "fluent_style", "standard")
-    if style == "accent":
-        widget.configure(state="normal" if enabled else "disabled",
-                         fg_color=C["accent"] if enabled else C["accent_disabled"],
-                         text_color_disabled=C["on_accent_disabled"])
-    else:
-        widget.configure(state="normal" if enabled else "disabled")
-
-
-def icon_button(master, app, glyph, command, size=32, style="subtle", token="text", **kwargs):
-    spec = BUTTON_STYLES[style]
-    return ctk.CTkButton(master, text="", image=app.glyphs.image(glyph, 16, token), command=command, width=size,
-                         height=size, corner_radius=4, border_width=spec["border_width"],
-                         border_color=C[spec["border"]] if spec["border"] else None,
-                         fg_color=C[spec["fg"]] if spec["fg"] else "transparent", hover_color=C[spec["hover"]],
-                         **kwargs)
+    def paintEvent(self, _event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        rect = QRectF(0.5, 0.5, 39, 19)
+        on, enabled, hover = self.isChecked(), self.isEnabled(), self.underMouse()
+        if on:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(qcolor("accent_disabled" if not enabled else "accent_hover" if hover else "accent"))
+        else:
+            painter.setPen(QPen(qcolor("text_disabled" if not enabled else "control_strong"), 1))
+            painter.setBrush(qcolor("subtle_hover" if hover else "control_alt"))
+        painter.drawRoundedRect(rect, 9.5, 9.5)
+        radius = 7 if hover and enabled else 6
+        x = 10 + self._position * 20
+        painter.setPen(Qt.PenStyle.NoPen)
+        if on:
+            painter.setBrush(qcolor("on_accent_disabled" if not enabled else "on_accent"))
+        else:
+            painter.setBrush(qcolor("text_disabled" if not enabled else "text2"))
+        painter.drawEllipse(QRectF(x - radius, 10 - radius, radius * 2, radius * 2))
+        painter.end()
 
 
-def glyph_label(master, app, glyph, size=16, token="text", **kwargs):
-    kwargs.setdefault("width", size)
-    return ctk.CTkLabel(master, text="", image=app.glyphs.image(glyph, size, token), **kwargs)
+class ComboBox(QComboBox, Painted):
+    """WinUI ComboBox: a button-like box with a chevron."""
+
+    def __init__(self, values, width=200):
+        super().__init__()
+        self.addItems(values)
+        self.setFixedWidth(width)
+        self.setMaxVisibleItems(12)
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setPen(qcolor("text2"))
+        painter.setFont(glyph_font(12))
+        painter.drawText(QRectF(self.width() - 32, 0, 22, self.height()), Qt.AlignmentFlag.AlignCenter,
+                         THEME.glyph("chevron_down"))
+        painter.end()
 
 
-def checkbox(master, command):
-    return ctk.CTkCheckBox(master, text="", width=20, checkbox_width=20, checkbox_height=20, corner_radius=4,
-                           border_width=1, fg_color=C["accent"], hover_color=C["accent_hover"],
-                           border_color=C["control_strong"], checkmark_color=C["on_accent"], command=command)
+class DropDownButton(QPushButton, Painted):
+    """WinUI DropDownButton: text, then a chevron; the menu opens under it."""
+
+    def __init__(self, text, icon, menu):
+        super().__init__(text)
+        self.setProperty("kind", "standard")
+        set_glyph(self, icon)
+        self.setMenu(menu)
+        self.setProperty("dropdown", "true")
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setPen(qcolor("text2" if self.isEnabled() else "text_disabled"))
+        painter.setFont(glyph_font(10))
+        painter.drawText(QRectF(self.width() - 26, 0, 16, self.height()), Qt.AlignmentFlag.AlignCenter,
+                         THEME.glyph("chevron_down"))
+        painter.end()
 
 
-class Toggle(ctk.CTkSwitch):
-    """WinUI ToggleSwitch: outlined when off, accent with a contrasting knob when on."""
-
-    def __init__(self, master, variable, command):
-        self._user_command = command
-        super().__init__(master, text="", variable=variable, command=self._changed, width=44, switch_width=40,
-                         switch_height=20, border_width=1, button_length=0, progress_color=C["accent"])
-        self._style()
-
-    def _changed(self):
-        self._style()
-        if self._user_command:
-            self._user_command()
-
-    def _style(self):
-        on = bool(self.get())
-        self.configure(fg_color=C["control"], border_color=C["accent"] if on else C["control_strong"],
-                       button_color=C["on_accent"] if on else C["control_strong"],
-                       button_hover_color=C["on_accent"] if on else C["text2"])
-
-    def set_value(self, on):
-        self.select() if on else self.deselect()
-        self._style()
+def flyout_menu(parent):
+    """A QMenu with rounded corners (WinUI MenuFlyout)."""
+    menu = QMenu(parent)
+    menu.setWindowFlags(menu.windowFlags() | Qt.WindowType.FramelessWindowHint
+                        | Qt.WindowType.NoDropShadowWindowHint)
+    menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+    return menu
 
 
-def combo(master, app, values, command, width=200):
-    menu_text = ("#1a1a1a", "#ffffff")
-    return ctk.CTkOptionMenu(master, values=values, command=command, width=width, height=32, corner_radius=4,
-                             fg_color=C["control"], button_color=C["control"], button_hover_color=C["control_hover"],
-                             text_color=C["text"], font=app.fonts.body, dropdown_font=app.fonts.body,
-                             dropdown_fg_color=C["menu"], dropdown_hover_color=C["menu_hover"],
-                             dropdown_text_color=menu_text, dynamic_resizing=False)
+class SelectorItem(QAbstractButton, Painted):
+    def __init__(self, text=""):
+        super().__init__()
+        self.setCheckable(True)
+        self.setText(text)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover)
+        self.setFixedHeight(40)
+
+    def setText(self, text):
+        super().setText(text)
+        bold = QFont(self.font())
+        bold.setWeight(QFont.Weight.DemiBold)
+        self.setFixedWidth(QFontMetrics(bold).horizontalAdvance(text) + 26)
+
+    def paintEvent(self, _event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if self.underMouse():
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(qcolor("subtle_pressed" if self.isDown() else "subtle_hover"))
+            painter.drawRoundedRect(QRectF(self.rect()).adjusted(0, 2, 0, -2), 4, 4)
+        font = QFont(self.font())
+        font.setWeight(QFont.Weight.DemiBold if self.isChecked() else QFont.Weight.Normal)
+        painter.setFont(font)
+        painter.setPen(qcolor("text" if self.isChecked() else "text2"))
+        painter.drawText(QRectF(self.rect()).adjusted(0, -2, 0, -2), Qt.AlignmentFlag.AlignCenter, self.text())
+        if self.isChecked():
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(qcolor("accent"))
+            painter.drawRoundedRect(QRectF(self.width() / 2 - 8, self.height() - 5, 16, 3), 1.5, 1.5)
+        painter.end()
 
 
-def progress_bar(master, width=160, height=4):
-    return ctk.CTkProgressBar(master, width=width, height=height, corner_radius=2, fg_color=C["track"],
-                              progress_color=C["accent"])
+class SelectorBar(QWidget):
+    """WinUI SelectorBar: text items, the selected one in bold with an accent mark under it."""
+
+    def __init__(self, names, on_select):
+        super().__init__()
+        self.items, self.on_select = {}, on_select
+        layout = hbox(spacing=2)
+        self.setLayout(layout)
+        group = QButtonGroup(self)
+        group.setExclusive(True)
+        for name in names:
+            item = SelectorItem()
+            item.clicked.connect(lambda _checked=False, n=name: self.on_select(n))
+            group.addButton(item)
+            layout.addWidget(item)
+            self.items[name] = item
+        self.items[names[0]].setChecked(True)
+
+    def set_text(self, name, text):
+        self.items[name].setText(text)
+
+    def select(self, name):
+        self.items[name].setChecked(True)
 
 
-def scroll_area(master, color="layer"):
-    area = ctk.CTkScrollableFrame(master, fg_color=C[color], corner_radius=0, scrollbar_button_color=C["text3"],
-                                  scrollbar_button_hover_color=C["text2"])
-    try:   # thin like WinUI's scrollbars (private attribute: cosmetic only)
-        area._scrollbar.configure(width=10)
-    except Exception:
-        pass
-    return area
-
-
-def card(master, color="card", border="card_border", **kwargs):
-    return ctk.CTkFrame(master, fg_color=C[color], border_color=C[border], border_width=1, corner_radius=4, **kwargs)
-
-
-class Divider(tk.Frame):
-    """A 1 px line (CustomTkinter frames draw nothing under 2 px), recoloured with the theme."""
-
-    def __init__(self, master, token="divider"):
-        super().__init__(master, height=1, bd=0, highlightthickness=0)
-        self.colors = C[token]
-        ctk.AppearanceModeTracker.add(self._set_mode, self)
-        self._set_mode(ctk.get_appearance_mode())
-
-    def _set_mode(self, mode):
-        self.configure(bg=self.colors[1 if str(mode).lower() == "dark" else 0])
-
-    def destroy(self):
-        try:
-            ctk.AppearanceModeTracker.remove(self._set_mode)
-        except Exception:
-            pass
-        super().destroy()
-
-
-def divider(master):
-    return Divider(master)
-
-
-def section_header(master, app, text, first=False):
-    widget = label(master, text, app.fonts.body_strong)
-    widget.pack(fill="x", pady=(0 if first else 22, 6))
-    return widget
-
-
-def settings_card(master, app, glyph, title, description=None):
-    """A WinUI SettingsCard: icon, title and description on the left, the control on the right.
-    Returns the card, the frame for the control and the texts frame."""
-    box = card(master)
-    box.pack(fill="x", pady=(0, 4))
-    row = ctk.CTkFrame(box, fg_color="transparent")
-    row.pack(fill="x", padx=(16, 16), pady=14)
-    if glyph:
-        glyph_label(row, app, glyph, 20).pack(side="left", padx=(2, 18))
-    right = ctk.CTkFrame(row, fg_color="transparent")
-    right.pack(side="right", padx=(16, 0))
-    texts = ctk.CTkFrame(row, fg_color="transparent")
-    texts.pack(side="left", fill="x", expand=True)
-    label(texts, title, app.fonts.body).pack(fill="x")
-    if description:
-        wrapping(label(texts, description, app.fonts.caption, "text2")).pack(fill="x")
-    box.row = row
-    return box, right, texts
-
-
-def infobar(master, app, text, glyph="info", token="accent"):
-    """A WinUI InfoBar (informational): icon and message on a quiet card."""
-    box = card(master, color="card_secondary")
-    row = ctk.CTkFrame(box, fg_color="transparent")
-    row.pack(fill="x", padx=16, pady=10)
-    glyph_label(row, app, glyph, 16, token).pack(side="left", padx=(0, 12), anchor="n", pady=2)
-    holder = ctk.CTkFrame(row, fg_color="transparent")
-    holder.pack(side="left", fill="x", expand=True)
-    wrapping(label(holder, text, app.fonts.small)).pack(fill="x")
-    return box
-
-
-def tile(master, app, name, image=None, protected=False):
+class Tile(QWidget, Painted):
     """32 px square: the application's icon, or its initial on a coloured background."""
-    if image is not None:
-        box = ctk.CTkFrame(master, width=32, height=32, corner_radius=6, fg_color="transparent")
-        inner = ctk.CTkLabel(box, text="", image=image, width=24, height=24, fg_color="transparent")
-    else:
-        box = ctk.CTkFrame(master, width=32, height=32, corner_radius=6,
-                           fg_color=C["neutral_bg"] if protected else tile_color(name))
-        inner = ctk.CTkLabel(box, text=tile_letter(name), font=app.fonts.tile, width=24, height=24,
-                             fg_color="transparent", text_color=C["text2"] if protected else ("#ffffff", "#dfdfdf"))
-    box.pack_propagate(False)
-    inner.place(relx=0.5, rely=0.5, anchor="center")
-    box.inner = inner
+
+    def __init__(self, name, pixmap=None, protected=False):
+        super().__init__()
+        self.setFixedSize(32, 32)
+        self.name, self.pixmap, self.protected = name, pixmap, protected
+
+    def set_pixmap(self, pixmap):
+        if pixmap is not None:
+            self.pixmap = pixmap
+            self.update()
+
+    def paintEvent(self, _event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        if self.pixmap is not None:
+            painter.drawPixmap(QRectF(4, 4, 24, 24).toRect(), self.pixmap)
+        else:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(qcolor("neutral_bg") if self.protected else QColor(tile_color(self.name)))
+            painter.drawRoundedRect(QRectF(0, 0, 32, 32), 6, 6)
+            font = QFont(THEME.ui_font)
+            font.setPixelSize(15)
+            font.setWeight(QFont.Weight.DemiBold)
+            painter.setFont(font)
+            painter.setPen(qcolor("text2") if self.protected else QColor("#ffffff"))
+            painter.drawText(QRectF(0, 0, 32, 32), Qt.AlignmentFlag.AlignCenter, tile_letter(self.name))
+        painter.end()
+
+
+def toggle_with_state(app, checked, on_change, enabled=True):
+    """A ToggleSwitch with its On/Off text on the left, as WinUI shows it."""
+    box = QWidget()
+    layout = hbox(spacing=12)
+    box.setLayout(layout)
+    state = label("", tone="secondary")
+    toggle = Toggle(checked)
+    toggle.setEnabled(enabled)
+
+    def show(value):
+        state.setText(app.t("toggle_on") if value else app.t("toggle_off"))
+
+    show(checked)
+    toggle.toggled.connect(show)
+    toggle.toggled.connect(lambda value: on_change(bool(value)))
+    layout.addWidget(state)
+    layout.addWidget(toggle)
+    box.toggle = toggle
     return box
 
 
-def set_tile_icon(box, image):
-    """Show an icon that arrived after the tile was drawn with the application's initial."""
-    try:
-        if image is not None and box.winfo_exists():
-            box.configure(fg_color="transparent")
-            box.inner.configure(text="", image=image)
-    except tk.TclError:
-        pass  # the card was rebuilt in the meantime
+def settings_card(glyph, title, description=None, control=None, parent_layout=None):
+    """A WinUI SettingsCard: icon, title and description on the left, the control on the right."""
+    box = card()
+    layout = hbox((16, 12, 16, 12), 16)
+    box.setLayout(layout)
+    box.setMinimumHeight(68)
+    if glyph:
+        layout.addWidget(glyph_label(glyph, 20))
+    texts = vbox(spacing=0)
+    texts.addWidget(label(title))
+    box.description = None
+    if description:
+        box.description = label(description, "caption", "secondary", wrap=True)
+        texts.addWidget(box.description)
+    box.texts = texts
+    layout.addLayout(texts, 1)
+    if control is not None:
+        layout.addWidget(control, 0, Qt.AlignmentFlag.AlignVCenter)
+    if parent_layout is not None:
+        parent_layout.addWidget(box)
+    return box
 
 
-STATUS_STYLES = {   # status pill: background and text colour tokens
-    "neutral": ("neutral_bg", "text2"),
-    "success": ("success_bg", "success"),
-    "caution": ("caution_bg", "caution"),
-    "critical": ("critical_bg", "critical"),
-}
+def section_header(text, parent_layout, first=False):
+    if not first:
+        parent_layout.addSpacing(18)
+    parent_layout.addWidget(label(text, "strong"))
+    parent_layout.addSpacing(6)
 
 
-def pill(master, app):
-    return ctk.CTkLabel(master, text="", font=app.fonts.caption_strong, height=24, corner_radius=12, padx=10)
+def infobar(text, glyph="info"):
+    """A WinUI InfoBar (informational): icon and message on a quiet card."""
+    box = card("secondary")
+    layout = hbox((16, 10, 16, 10), 12)
+    box.setLayout(layout)
+    icon = glyph_label(glyph, tone="accent")
+    icon.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
+    box.icon = icon
+    layout.addWidget(icon)
+    layout.addWidget(label(text, "small", wrap=True), 1)
+    return box
 
 
-class Page(ctk.CTkFrame):
-    """A page on the content layer: rounded top-left corner and edge, like WinUI pages."""
-
-    def __init__(self, app):
-        super().__init__(app.content, fg_color=C["layer"], bg_color=C["bg"], corner_radius=8, border_width=1,
-                         border_color=C["layer_border"])
-        self.app = app
-        # CustomTkinter refuses a size in place(); the layer must overhang its area, so Tk's own
-        # placer is used with the overhang in real pixels.
-        overhang = scaled(self, OVERHANG)
-        tk.Place.place_configure(self, x=0, y=0, relwidth=1, relheight=1, width=overhang, height=overhang)
+def pill():
+    widget = label("", tone=None)
+    widget.setProperty("pill", "neutral")
+    return widget
 
 
-def page_header(page, app, title, row=0, pady=(28, 16)):
-    """Title of a page. Returns the header (actions go on its right) and the block under the
-    title (for a subtitle)."""
-    header = ctk.CTkFrame(page, fg_color="transparent")
-    header.grid(row=row, column=0, sticky="ew", padx=(PAD, PAD_RIGHT), pady=pady)
-    titles = ctk.CTkFrame(header, fg_color="transparent")
-    titles.pack(side="left", fill="x", expand=True)
-    label(titles, title, app.fonts.title).pack(fill="x")
-    return header, titles
+def page_header(title):
+    """Title row of a page: returns the layout, the texts block (for a subtitle) and the actions row."""
+    row = hbox(spacing=16)
+    texts = vbox(spacing=2)
+    texts.addWidget(label(title, "title"))
+    row.addLayout(texts, 1)
+    actions = hbox(spacing=8)
+    row.addLayout(actions)
+    return row, texts, actions
 
 
-class Dialog(ctk.CTkToplevel):
-    """A WinUI ContentDialog in its own window (confirmation when `confirm_text` is given)."""
+class Dialog(QWidget):
+    """A WinUI ContentDialog: a card over the window, which is dimmed behind it."""
 
     def __init__(self, app, title, message, items=(), confirm_text=None, on_confirm=None, cancel_text=None):
-        super().__init__(app, fg_color=C["layer"])
-        self.app, self.on_confirm = app, on_confirm
-        self._counted = True
+        super().__init__(app)
+        self.app, self.on_confirm, self.confirm_text = app, on_confirm, confirm_text
+        self._open = True
         app.dialogs += 1   # automatic list refreshes wait while a dialog is open
-        try:
-            self.iconbitmap(resource_path("app.ico"))
-        except tk.TclError:
-            pass
-        self.window_icon = WindowIcon(self)
-        self.title(title)
-        self.resizable(False, False)
-        self.transient(app)
-        body = ctk.CTkFrame(self, fg_color="transparent")
-        body.pack(fill="both", expand=True, padx=24, pady=(22, 24))
-        label(body, title, app.fonts.subtitle, wraplength=460).pack(fill="x")
-        label(body, message, app.fonts.body, wraplength=460).pack(fill="x", pady=(12, 0))
+        self.setGeometry(app.rect())
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        outer = vbox((24, 24, 24, 24))
+        self.setLayout(outer)
+        outer.addStretch(1)
+        frame = QFrame()
+        frame.setObjectName("dialogCard")
+        frame.setFixedWidth(min(520, max(340, app.width() - 96)))
+        shadow = QGraphicsDropShadowEffect(frame)
+        shadow.setBlurRadius(48)
+        shadow.setOffset(0, 12)
+        shadow.setColor(QColor(0, 0, 0, 90))
+        frame.setGraphicsEffect(shadow)
+        row = hbox()
+        row.addStretch(1)
+        row.addWidget(frame)
+        row.addStretch(1)
+        outer.addLayout(row)
+        outer.addStretch(2)
+        layout = vbox()
+        frame.setLayout(layout)
+        body = vbox((24, 22, 24, 24), 12)
+        layout.addLayout(body)
+        self.title_label = label(title, "subtitle", wrap=True)
+        body.addWidget(self.title_label)
+        self.message_label = label(message, wrap=True)
+        body.addWidget(self.message_label)
+        self.labels = [self.title_label, self.message_label]
         items = list(items)
         if items:
             shown, hidden = core.truncate(items, MAX_DIALOG_ITEMS)
-            box = card(body)
-            box.pack(fill="x", pady=(16, 0))
+            box = card()
+            box_layout = vbox((14, 10, 14, 10), 6)
+            box.setLayout(box_layout)
             for item in shown:
-                label(box, f"•  {shorten(item, 70)}", app.fonts.body).pack(fill="x", padx=14, pady=(8, 0))
+                line = label(f"•  {shorten(item, 70)}")
+                box_layout.addWidget(line)
+                self.labels.append(line)
             if hidden:
-                label(box, app.t("more_items", count=hidden), app.fonts.caption, "text2").pack(
-                    fill="x", padx=14, pady=(6, 0))
-            box.winfo_children()[-1].pack_configure(pady=(6, 12))
-        divider(self).pack(fill="x")
-        footer = ctk.CTkFrame(self, fg_color=C["bg"], corner_radius=0)
-        footer.pack(fill="x")
-        buttons = ctk.CTkFrame(footer, fg_color="transparent")
-        buttons.pack(fill="x", padx=24, pady=24)
-        buttons.grid_columnconfigure((0, 1), weight=1, uniform="buttons")
+                box_layout.addWidget(label(app.t("more_items", count=hidden), "caption", "secondary"))
+            body.addWidget(box)
+        footer = QFrame()
+        footer.setObjectName("dialogFooter")
+        buttons = hbox((24, 24, 24, 24), 8)
+        footer.setLayout(buttons)
+        layout.addWidget(footer)
         if confirm_text:
-            button(buttons, app, confirm_text, self._confirm, style="accent", width=150).grid(
-                row=0, column=0, sticky="ew", padx=(0, 4))
-            button(buttons, app, cancel_text or app.t("cancel"), self.destroy, width=150).grid(
-                row=0, column=1, sticky="ew", padx=(4, 0))
+            self.confirm_button = button(confirm_text, self._confirm, "accent")
+            buttons.addWidget(self.confirm_button, 1)
+            self.cancel_button = button(cancel_text or app.t("cancel"), self.destroy)
+            buttons.addWidget(self.cancel_button, 1)
+            default = self.confirm_button
         else:
-            button(buttons, app, app.t("ok"), self.destroy, style="accent", width=150).grid(
-                row=0, column=1, sticky="ew")
-        self.bind("<Escape>", lambda _e: self.destroy())
-        self.bind("<Return>", lambda _e: self._confirm() if confirm_text else self.destroy())
-        self.update_idletasks()
-        x = app.winfo_rootx() + (app.winfo_width() - self.winfo_reqwidth()) // 2
-        y = app.winfo_rooty() + (app.winfo_height() - self.winfo_reqheight()) // 3
-        self.geometry(f"+{max(0, x)}+{max(0, y)}")
-        # CTkToplevel may open behind its parent on Windows: raise it once it exists.
-        self.after(20, self._raise)
+            buttons.addStretch(1)
+            default = button(app.t("ok"), self.destroy, "accent")
+            buttons.addWidget(default, 1)
+        self.show()
+        self.raise_()
+        default.setFocus()
 
-    def _raise(self):
-        try:
-            self.app.apply_backdrop(self)
-            self.lift()
-            self.focus_force()
-            self.grab_set()
-        except tk.TclError:
-            pass
+    def paintEvent(self, _event):
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), qcolor("smoke"))
+        painter.end()
+
+    def mousePressEvent(self, event):
+        event.accept()   # modal: clicks behind the dialog do nothing
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape:
+            self.destroy()
+        elif event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self._confirm() if self.confirm_text else self.destroy()
+        else:
+            super().keyPressEvent(event)
 
     def destroy(self):
-        if self._counted:
-            self._counted = False
+        if self._open:
+            self._open = False
             self.app.dialogs -= 1
-        super().destroy()
+            self.hide()
+            self.deleteLater()
 
     def _confirm(self):
         callback = self.on_confirm
@@ -434,50 +620,54 @@ class Entry:
     protected: bool = False
 
 
-class AppCard(ctk.CTkFrame):
-    def __init__(self, master, page, entry, image):
-        super().__init__(master, fg_color=C["card_secondary" if entry.protected else "card"],
-                         border_color=C["card_border"], border_width=1, corner_radius=4)
-        app = page.app
-        self.page, self.entry, self.windows_frame = page, entry, None
-        row = ctk.CTkFrame(self, fg_color="transparent")
-        row.pack(fill="x", padx=(16, 8), pady=12)
-        clickable = [row]
+class AppCard(QFrame):
+    def __init__(self, page, entry, pixmap):
+        super().__init__()
+        self.setProperty("card", "secondary" if entry.protected else "default")
+        self.setProperty("hover", "true")
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover)
+        self.page, self.entry, self.windows_box = page, entry, None
+        outer = vbox()
+        self.setLayout(outer)
+        row = hbox((16, 12, 8, 12), 16)
+        outer.addLayout(row)
         if entry.protected:
-            glyph_label(row, app, "lock", 16, "text3", width=20).pack(side="left", padx=(0, 16))
+            row.addWidget(glyph_label("lock", tone="tertiary"))
             self.check = None
         else:
-            self.check = checkbox(row, self._on_check)
-            self.check.pack(side="left", padx=(0, 12))
-        icon = tile(row, app, entry.name, image, entry.protected)
-        icon.pack(side="left", padx=(0, 16))
-        self.tile = icon
-        texts = ctk.CTkFrame(row, fg_color="transparent")
-        texts.pack(side="left", fill="x", expand=True)
-        name = label(texts, entry.name, app.fonts.body_strong, "text2" if entry.protected else "text")
-        name.pack(fill="x")
-        meta = label(texts, entry.meta, app.fonts.caption, "text3" if entry.protected else "text2")
-        meta.pack(fill="x")
-        clickable += [icon, icon.inner, texts, name, meta]
+            self.check = CheckBox()
+            self.check.toggled.connect(self._on_check)
+            row.addWidget(self.check)
+        self.tile = Tile(entry.name, pixmap, entry.protected)
+        row.addWidget(self.tile)
+        texts = vbox()
+        texts.addWidget(label(entry.name, "strong", "secondary" if entry.protected else None))
+        texts.addWidget(label(entry.meta, "caption", "tertiary" if entry.protected else "secondary"))
+        row.addLayout(texts, 1)
         self.chevron = None
         if entry.titles:
-            self.chevron = icon_button(row, app, "chevron_down", self.toggle_expand)
-            self.chevron.pack(side="right")
-        if not entry.protected:
-            for widget in clickable:
-                widget.bind("<Button-1>", lambda _e: self.check.toggle())
+            self.chevron = icon_button("chevron_down", self.toggle_expand)
+            row.addWidget(self.chevron)
+        self.outer = outer
 
-    def _on_check(self):
-        self.page.set_selected(self.entry.proc_key, bool(self.check.get()))
+    def mousePressEvent(self, event):
+        if self.check is not None and event.button() == Qt.MouseButton.LeftButton:
+            self.check.toggle()
+        super().mousePressEvent(event)
+
+    def _on_check(self, checked):
+        self.page.set_selected(self.entry.proc_key, bool(checked))
 
     def show_selected(self, selected):
         if self.check is None:
             return
-        if selected:
-            self.check.select()
-        else:
-            self.check.deselect()
-        self.configure(fg_color=C["card_selected"] if selected else C["card"])
+        self.check.blockSignals(True)
+        self.check.setChecked(selected)
+        self.check.blockSignals(False)
+        self.check.update()
+        kind = "selected" if selected else "default"
+        if self.property("card") != kind:
+            set_prop(self, "card", kind)
 
     def toggle_expand(self):
         expanded = self.entry.card_key not in self.page.expanded
@@ -490,52 +680,28 @@ class AppCard(ctk.CTkFrame):
     def show_expanded(self, expanded):
         if self.chevron is None:
             return
-        app = self.page.app
-        self.chevron.configure(image=app.glyphs.image("chevron_up" if expanded else "chevron_down", 16))
-        if expanded and self.windows_frame is None:
+        set_glyph(self.chevron, "chevron_up" if expanded else "chevron_down")
+        if expanded and self.windows_box is None:
             # Built on first use: most cards are never expanded.
-            self.windows_frame = ctk.CTkFrame(self, fg_color="transparent")
-            divider(self.windows_frame).pack(fill="x", padx=1)
+            self.windows_box = QWidget()
+            layout = vbox((0, 0, 0, 8))
+            self.windows_box.setLayout(layout)
+            layout.addWidget(divider())
             for title in self.entry.titles:
-                row = ctk.CTkFrame(self.windows_frame, fg_color="transparent")
-                row.pack(fill="x", padx=(96, 16), pady=(8, 0))
-                glyph_label(row, app, "window", 14, "text2").pack(side="left", padx=(0, 12))
-                label(row, shorten(title), app.fonts.small, "text2").pack(side="left", fill="x", expand=True)
-            row.pack_configure(pady=(8, 12))
-        if self.windows_frame is not None:
-            if expanded:
-                self.windows_frame.pack(fill="x", padx=1, pady=(0, 1))
-            else:
-                self.windows_frame.pack_forget()
+                row = hbox((100, 8, 16, 0), 12)
+                row.addWidget(glyph_label("window", 12, "secondary"))
+                row.addWidget(label(shorten(title), "small", "secondary"), 1)
+                layout.addLayout(row)
+            self.outer.addWidget(self.windows_box)
+        if self.windows_box is not None:
+            self.windows_box.setVisible(expanded)
 
 
-class SelectorBar(ctk.CTkFrame):
-    """WinUI SelectorBar: text items, the selected one in bold with an accent mark under it."""
-
-    def __init__(self, master, app, names, command):
-        super().__init__(master, fg_color="transparent")
-        self.app, self.command, self.items, self.current = app, command, {}, names[0]
-        for name in names:
-            item = ctk.CTkButton(self, text="", command=lambda n=name: self.select(n, notify=True), height=40,
-                                 width=60, corner_radius=4, fg_color="transparent", hover_color=C["subtle_hover"],
-                                 text_color=C["text2"], font=app.fonts.body)
-            item.pack(side="left", padx=(0, 4))
-            self.items[name] = item
-        self.mark = ctk.CTkFrame(self, width=16, height=3, corner_radius=2, fg_color=C["accent"])
-        self.select(names[0])
-
-    def set_text(self, name, text):
-        self.items[name].configure(text=text)
-
-    def select(self, name, notify=False):
-        self.current = name
-        for key, item in self.items.items():
-            item.configure(text_color=C["text"] if key == name else C["text2"],
-                           font=self.app.fonts.body_strong if key == name else self.app.fonts.body)
-        self.mark.place(in_=self.items[name], relx=0.5, rely=1.0, anchor="s", y=-3)
-        self.mark.lift()
-        if notify:
-            self.command(name)
+class Page(QWidget):
+    def __init__(self, app):
+        super().__init__()
+        self.setObjectName("page")
+        self.app = app
 
 
 class ListPage(Page):
@@ -547,82 +713,91 @@ class ListPage(Page):
         self.selected = set(state.get("selected", ()))
         self.expanded = set(state.get("expanded", ()))
         self.filter = "all"
-        self.search_job = None
         self.app_count = self.selectable_count = 0
         self.notice = None          # status-bar message shown for NOTICE_MS
-        self.notice_job = None
-        self.refresh_jobs, self.retry_job = [], None
+        self.notice_timer = None
+        self.refresh_timers, self.retry_timer = [], None
         self.restarting_explorer = False
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(2, weight=1)
+        self.search_timer = QTimer(self)
+        self.search_timer.setSingleShot(True)
+        self.search_timer.timeout.connect(self.apply_filter)
+        layout = vbox()
+        self.setLayout(layout)
 
-        header, titles = page_header(self, app, t("apps_title"))
-        self.summary = label(titles, "", app.fonts.body, "text2")
-        self.summary.pack(fill="x", pady=(2, 0))
-        actions = ctk.CTkFrame(header, fg_color="transparent")
-        actions.pack(side="right", anchor="n", pady=(4, 0))
-        icon_button(actions, app, "refresh", self.refresh, style="standard").pack(side="right")
+        top = vbox((PAD, 28, PAD, 0), 0)
+        layout.addLayout(top)
+        header, titles, actions = page_header(t("apps_title"))
+        self.summary = label("", tone="secondary")
+        titles.addWidget(self.summary)
         if not app.is_admin:
-            button(actions, app, t("admin_button"), app.restart_as_admin, icon="shield").pack(side="right", padx=(0, 8))
-
-        toolbar = ctk.CTkFrame(self, fg_color="transparent")
-        toolbar.grid(row=1, column=0, sticky="ew", padx=(PAD, PAD_RIGHT), pady=(0, 12))
-        self.filter_bar = SelectorBar(toolbar, app, ["all", "selected"], self._on_filter)
-        self.filter_bar.pack(side="right", padx=(24, 0))
-        search = ctk.CTkFrame(toolbar, fg_color=C["input"], border_color=C["input_border"], border_width=1,
-                              corner_radius=4, height=32)
-        search.pack(side="left", fill="x", expand=True)
-        glyph_label(search, app, "search", 16, "text2").pack(side="right", padx=(4, 10))
-        self.search = ctk.CTkEntry(search, placeholder_text=t("search_placeholder"), font=app.fonts.body, height=28,
-                                   border_width=0, corner_radius=0, fg_color=C["input"], text_color=C["text"],
-                                   placeholder_text_color=C["text2"])
-        self.search.pack(side="left", fill="x", expand=True, padx=(8, 0), pady=2)
+            actions.addWidget(button(t("admin_button"), app.restart_as_admin, icon="shield"), 0,
+                              Qt.AlignmentFlag.AlignTop)
+        actions.addWidget(icon_button("refresh", self.refresh, "standard", t("refresh")), 0, Qt.AlignmentFlag.AlignTop)
+        top.addLayout(header)
+        top.addSpacing(20)
+        toolbar = hbox(spacing=24)
+        self.search = QLineEdit()
+        self.search.setPlaceholderText(t("search_placeholder"))
+        self.search.setClearButtonEnabled(False)
+        self.search_action = self.search.addAction(QIcon(glyph_pixmap("search", "text2")),
+                                                   QLineEdit.ActionPosition.TrailingPosition)
+        self.search.setMinimumHeight(32)
         if state.get("query"):
-            self.search.insert(0, state["query"])
-        self.search.bind("<KeyRelease>", self._schedule_filter)
-        self.search.bind("<Escape>", self._clear_search)
+            self.search.setText(state["query"])
+        self.search.textChanged.connect(lambda _text: self.search_timer.start(SEARCH_DELAY_MS))
+        self.search.installEventFilter(self)
+        toolbar.addWidget(self.search, 1)
+        self.filter_bar = SelectorBar(["all", "selected"], self._on_filter)
+        toolbar.addWidget(self.filter_bar)
+        top.addLayout(toolbar)
+        top.addSpacing(12)
 
-        self.list = scroll_area(self)
-        self.list.grid(row=2, column=0, sticky="nsew", padx=(PAD - 8, PAD_RIGHT - 16))
-        self.empty = label(self.list, "", app.fonts.body, "text2", anchor="center", justify="center")
-        self.protected_header = ctk.CTkFrame(self.list, fg_color="transparent")
-        glyph_label(self.protected_header, app, "lock", 14, "text2").pack(side="left", padx=(2, 8))
-        label(self.protected_header, t("protected_header"), app.fonts.body_strong, "text2").pack(side="left")
+        area, self.list = scroll_area()
+        self.list_layout = self.list.layout()
+        self.list_layout.setContentsMargins(PAD - 4, 0, PAD - 16, 16)
+        self.list_layout.setSpacing(4)
+        self.list_layout.addStretch(1)
+        layout.addWidget(area, 1)
+        self.empty = label("", tone="secondary")
+        self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.protected_header = QWidget()
+        header_row = hbox((4, 14, 0, 6), 8)
+        self.protected_header.setLayout(header_row)
+        header_row.addWidget(glyph_label("lock", 12, "secondary"))
+        header_row.addWidget(label(t("protected_header"), "strong", "secondary"), 1)
 
-        divider(self).grid(row=3, column=0, sticky="ew", padx=(1, OVERHANG))
-        bar = ctk.CTkFrame(self, fg_color="transparent", corner_radius=0)
-        bar.grid(row=4, column=0, sticky="ew", padx=(1, OVERHANG), pady=(0, OVERHANG))
-        self.close_button = button(bar, app, "", self.close_selected, style="accent", font=app.fonts.body_strong)
-        self.close_button.pack(side="right", padx=(0, PAD), pady=16)
-        self.clear_button = button(bar, app, t("clear_selection"), self.clear_selection)
-        self.explorer_menu = tk.Menu(self, tearoff=0)
-        self.explorer_menu.add_command(label=t("close_explorer_short"), command=self.close_explorer)
-        self.explorer_menu.add_command(label=t("restart_explorer_short"), command=self.restart_explorer)
-        self.explorer_button = button(bar, app, f"{t('explorer_group')}  ⌄", self._show_explorer_menu, icon="folder")
-        self.explorer_button.pack(side="right", padx=(0, 8), pady=16)
-        texts = ctk.CTkFrame(bar, fg_color="transparent")
-        self.selection_line = label(texts, "", app.fonts.body_strong)
-        self.selection_line.pack(fill="x")
-        hint = ctk.CTkFrame(texts, fg_color="transparent")
-        hint.pack(fill="x")
-        self.hint_icon = glyph_label(hint, app, "warning", 12, "caution")
-        self.hint_icon.pack(side="left", padx=(0, 6))
-        self.hint = label(hint, "", app.fonts.caption, "text2")
-        self.hint.pack(side="left", fill="x", expand=True)
-        # Packed after the buttons: they keep their full width and the texts take what is left.
-        texts.pack(side="left", fill="x", expand=True, padx=(PAD - 1, 16), pady=14)
-        texts.bind("<Configure>", self._wrap_bar_texts)
+        bar = QFrame()
+        bar.setProperty("bar", "true")
+        bar_layout = hbox((PAD, 14, PAD, 16), 8)
+        bar.setLayout(bar_layout)
+        texts = vbox(spacing=2)
+        self.selection_line = label("", "strong", wrap=True)
+        texts.addWidget(self.selection_line)
+        hint = hbox(spacing=6)
+        self.hint_icon = glyph_label("warning", 12, "caution")
+        hint.addWidget(self.hint_icon, 0, Qt.AlignmentFlag.AlignTop)
+        self.hint = label("", "caption", "secondary", wrap=True)
+        hint.addWidget(self.hint, 1)
+        texts.addLayout(hint)
+        bar_layout.addLayout(texts, 1)
+        self.explorer_menu = flyout_menu(self)
+        self.close_explorer_action = self.explorer_menu.addAction(t("close_explorer_short"), self.close_explorer)
+        self.restart_explorer_action = self.explorer_menu.addAction(t("restart_explorer_short"),
+                                                                    self.restart_explorer)
+        self.explorer_button = DropDownButton(t("explorer_group"), "folder", self.explorer_menu)
+        bar_layout.addWidget(self.explorer_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.clear_button = button(t("clear_selection"), self.clear_selection)
+        bar_layout.addWidget(self.clear_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.close_button = button("", self.close_selected, "accent")
+        bar_layout.addWidget(self.close_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(bar)
 
-    def _wrap_bar_texts(self, event):
-        # Narrow window or long translation: wrap the texts instead of cutting them off.
-        width = max(80, int(event.width / self._get_widget_scaling()))
-        for widget in (self.selection_line, self.hint):
-            if widget.cget("wraplength") != width:
-                widget.configure(wraplength=width - (20 if widget is self.hint else 0))
-
-    def _show_explorer_menu(self):
-        widget = self.explorer_button
-        self.explorer_menu.tk_popup(widget.winfo_rootx(), widget.winfo_rooty() + widget.winfo_height() + 2)
+    def eventFilter(self, watched, event):
+        if watched is self.search and event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Escape:
+            self.search.clear()
+            self.apply_filter()
+            return True
+        return super().eventFilter(watched, event)
 
     # ---------------------------------------------------------------- data
     def refresh(self, rebuild=False):
@@ -665,87 +840,83 @@ class ListPage(Page):
     def _build_cards(self, rebuild=False):
         old, self.cards = self.cards, {}
         for entry in self.entries:
-            card_widget = old.pop(entry.card_key, None)
-            if card_widget is not None and (rebuild or card_widget.entry != entry):
-                card_widget.destroy()
-                card_widget = None
-            if card_widget is None:
-                image = None
+            widget = old.pop(entry.card_key, None)
+            if widget is not None and (rebuild or widget.entry != entry):
+                widget.deleteLater()
+                widget = None
+            if widget is None:
+                pixmap = None
                 if self.app.settings["show_icons"]:
-                    image = self.app.icon_for(entry.exe_path, lambda img, key=entry.card_key: self._icon_ready(key, img))
-                card_widget = AppCard(self.list, self, entry, image)
-                card_widget.show_expanded(entry.card_key in self.expanded)
-            card_widget.show_selected(entry.proc_key in self.selected)
-            self.cards[entry.card_key] = card_widget
-        for card_widget in old.values():
-            card_widget.destroy()
+                    pixmap = self.app.icon_for(entry.exe_path, lambda pix, key=entry.card_key: self._icon_ready(key, pix))
+                widget = AppCard(self, entry, pixmap)
+                widget.show_expanded(entry.card_key in self.expanded)
+            widget.show_selected(entry.proc_key in self.selected)
+            self.cards[entry.card_key] = widget
+        for widget in old.values():
+            widget.deleteLater()
 
-    def _icon_ready(self, card_key, image):
-        card_widget = self.cards.get(card_key)
-        if card_widget is not None:
-            set_tile_icon(card_widget.tile, image)
+    def _icon_ready(self, card_key, pixmap):
+        widget = self.cards.get(card_key)
+        if widget is not None:
+            widget.tile.set_pixmap(pixmap)
 
     # ---------------------------------------------------------------- automatic refresh
     def schedule_refreshes(self, delays_ms):
         """Plan automatic refreshes (replaces those already planned)."""
-        for job in self.refresh_jobs:
-            self.after_cancel(job)
-        self.refresh_jobs = [self.after(delay, self._auto_refresh) for delay in delays_ms]
+        for timer in self.refresh_timers:
+            timer.stop()
+        self.refresh_timers = [self.app.later(delay, self._auto_refresh, self) for delay in delays_ms]
 
     def _auto_refresh(self):
         # Never while a closing runs (the list would be read mid-way), nor under an open dialog
         # (a confirmation must not disagree with the list behind it): retried shortly after.
         if self.app.busy or self.app.dialogs:
-            if self.retry_job is None:
-                self.retry_job = self.after(RETRY_REFRESH_MS, self._retry_refresh)
+            if self.retry_timer is None:
+                self.retry_timer = self.app.later(RETRY_REFRESH_MS, self._retry_refresh, self)
             return
         self.refresh()
 
     def _retry_refresh(self):
-        self.retry_job = None
+        self.retry_timer = None
         self._auto_refresh()
 
     # ---------------------------------------------------------------- filtering
-    def _schedule_filter(self, _event=None):
-        if self.search_job is not None:
-            self.after_cancel(self.search_job)
-        self.search_job = self.after(SEARCH_DELAY_MS, self.apply_filter)
-
-    def _clear_search(self, _event=None):
-        self.search.delete(0, "end")
-        self.apply_filter()
-
     def _on_filter(self, name):
         self.filter = "selected" if name == "selected" else "all"
         self.apply_filter()
 
     def apply_filter(self):
-        self.search_job = None
         t = self.app.t
-        query = self.search.get().strip().casefold()
-        for widget in self.list.winfo_children():
-            widget.pack_forget()
+        query = self.search.text().strip().casefold()
+        self.list.setUpdatesEnabled(False)
+        layout = self.list_layout
+        while layout.count() > 1:   # everything but the final stretch
+            item = layout.takeAt(0)
+            if item.widget() is not None:
+                item.widget().hide()
         visible = [e for e in self.entries if not query or query in e.search_text]
         normal = [e for e in visible if not e.protected]
         protected = [e for e in visible if e.protected]
         if self.filter == "selected":
             normal = [e for e in normal if e.proc_key in self.selected]
             protected = []
-        for entry in normal:
-            self.cards[entry.card_key].pack(fill="x", padx=(8, 12), pady=(0, 4))
+        shown = [self.cards[e.card_key] for e in normal]
         if protected:
-            self.protected_header.pack(fill="x", padx=10, pady=(18, 8))
-            for entry in protected:
-                self.cards[entry.card_key].pack(fill="x", padx=(8, 12), pady=(0, 4))
-        if not normal and not protected:
+            shown.append(self.protected_header)
+            shown += [self.cards[e.card_key] for e in protected]
+        if not shown:
             if query:
-                text = t("no_match", query=self.search.get().strip())
+                text = t("no_match", query=self.search.text().strip())
             elif self.filter == "selected":
                 text = t("no_selected")
             else:
                 text = t("no_windows")
-            self.empty.configure(text=text)
-            self.empty.pack(fill="x", pady=48)
+            self.empty.setText(text)
+            shown = [self.empty]
+        for index, widget in enumerate(shown):
+            layout.insertWidget(index, widget)
+            widget.show()
+        self.list.setUpdatesEnabled(True)
         self.update_counts()
 
     # ---------------------------------------------------------------- selection
@@ -768,31 +939,25 @@ class ListPage(Page):
 
     def update_counts(self):
         app, t = self.app, self.app.t
-        self.summary.configure(text=f"{app.tn('n_windows', len(self.windows))} · {app.tn('n_apps', self.app_count)}")
+        self.summary.setText(f"{app.tn('n_windows', len(self.windows))} · {app.tn('n_apps', self.app_count)}")
         self.filter_bar.set_text("all", t("filter_all", count=self.selectable_count))
         self.filter_bar.set_text("selected", t("filter_selected", count=len(self.selected)))
         self.filter_bar.select("selected" if self.filter == "selected" else "all")
         count = len(self.selected)
         windows = sum(1 for w in self.windows if w.key in self.selected)
         if count:
-            self.selection_line.configure(text=f"{app.tn('n_selected', count)} · {app.tn('n_windows', windows)}")
-            self.close_button.configure(text=app.tn("close_button", count))
-            set_enabled(self.close_button, True)
-            self.clear_button.pack(side="right", padx=(0, 8), pady=16, after=self.close_button)
+            self.selection_line.setText(f"{app.tn('n_selected', count)} · {app.tn('n_windows', windows)}")
+            self.close_button.setText(app.tn("close_button", count))
         else:
-            self.selection_line.configure(text=t("selection_none"))
-            self.close_button.configure(text=t("close_button_none"))
-            set_enabled(self.close_button, False)
-            self.clear_button.pack_forget()
+            self.selection_line.setText(t("selection_none"))
+            self.close_button.setText(t("close_button_none"))
+        self.close_button.setEnabled(bool(count))
+        self.clear_button.setVisible(bool(count))
         if self.notice:
-            self.selection_line.configure(text=self.notice)
+            self.selection_line.setText(self.notice)
         instant = app.settings["instant_force"]
-        self.hint.configure(text=t("close_hint_instant") if instant
-                            else t("close_hint", seconds=app.settings["close_timeout"]))
-        if instant:
-            self.hint_icon.pack(side="left", padx=(0, 6), before=self.hint)
-        else:
-            self.hint_icon.pack_forget()
+        self.hint.setText(t("close_hint_instant") if instant else t("close_hint", seconds=app.settings["close_timeout"]))
+        self.hint_icon.setVisible(instant)
 
     # ---------------------------------------------------------------- closing
     def close_selected(self):
@@ -822,11 +987,7 @@ class ListPage(Page):
         if app.busy or self.restarting_explorer:
             return
         count = core.close_explorer_windows()
-        self.notice = app.tn("explorer_closed", count) if count else app.t("explorer_none")
-        if self.notice_job is not None:
-            self.after_cancel(self.notice_job)
-        self.notice_job = self.after(NOTICE_MS, self._end_notice)
-        self.update_counts()
+        self._show_notice(app.tn("explorer_closed", count) if count else app.t("explorer_none"))
         self.schedule_refreshes(EXPLORER_REFRESH_MS)
 
     def restart_explorer(self):
@@ -840,7 +1001,7 @@ class ListPage(Page):
     def _start_explorer_restart(self):
         app = self.app
         self.restarting_explorer = True
-        set_enabled(self.explorer_button, False)
+        self.explorer_button.setEnabled(False)
         self._show_notice(app.t("explorer_restarting"), keep=True)
 
         def run():
@@ -859,8 +1020,8 @@ class ListPage(Page):
         app, t = self.app, self.app.t
         self.restarting_explorer = False
         try:
-            set_enabled(self.explorer_button, True)
-        except tk.TclError:
+            self.explorer_button.setEnabled(True)
+        except RuntimeError:
             return   # page rebuilt meanwhile (language change)
         if error is None:
             self._show_notice(t("explorer_restarted"))
@@ -870,72 +1031,79 @@ class ListPage(Page):
             Dialog(app, t("error"), t("explorer_restart_failed", error=t(error.key, detail=error.detail or "")))
 
     def _show_notice(self, text, keep=False):
-        if self.notice_job is not None:
-            self.after_cancel(self.notice_job)
-            self.notice_job = None
+        if self.notice_timer is not None:
+            self.notice_timer.stop()
+            self.notice_timer = None
         self.notice = text
         if text and not keep:
-            self.notice_job = self.after(NOTICE_MS, self._end_notice)
+            self.notice_timer = self.app.later(NOTICE_MS, self._end_notice, self)
         self.update_counts()
 
     def _end_notice(self):
-        self.notice_job, self.notice = None, None
+        self.notice_timer, self.notice = None, None
         self.update_counts()
 
     def focus_search(self):
-        self.search.focus_set()
+        self.search.setFocus()
 
     def state(self):
-        return {"selected": set(self.selected), "expanded": set(self.expanded), "query": self.search.get()}
+        return {"selected": set(self.selected), "expanded": set(self.expanded), "query": self.search.text()}
 
 
 # ====================================================================== closing screen
 
-class ClosingRow(ctk.CTkFrame):
-    def __init__(self, master, page, target):
-        super().__init__(master, fg_color=C["card"], border_color=C["card_border"], border_width=1, corner_radius=4)
+class ClosingRow(QFrame):
+    def __init__(self, page, target):
+        super().__init__()
+        self.setProperty("card", "default")
         app = page.app
         self.page, self.target = page, target
-        top = ctk.CTkFrame(self, fg_color="transparent")
-        top.pack(fill="x", padx=16, pady=12)
+        outer = vbox()
+        self.setLayout(outer)
+        top = hbox((16, 12, 16, 12), 16)
+        outer.addLayout(top)
         name = app.display_name(target.exe_path) or app.t("process_n", pid=target.pid)
-        image = None
+        pixmap = None
         if app.settings["show_icons"]:
-            image = app.icon_for(target.exe_path, lambda img: set_tile_icon(self.tile, img))
-        self.tile = tile(top, app, name, image)
-        self.tile.pack(side="left", padx=(0, 16))
-        texts = ctk.CTkFrame(top, fg_color="transparent")
-        texts.pack(side="left", fill="x", expand=True)
-        label(texts, name, app.fonts.body_strong).pack(fill="x")
-        meta = " · ".join([shorten(", ".join(target.titles), 80), app.t("pid", pid=target.pid)])
-        label(texts, meta, app.fonts.caption, "text2").pack(fill="x")
-        self.pill = pill(top, app)
-        self.pill.pack(side="right")
-        self.body = ctk.CTkFrame(self, fg_color="transparent", corner_radius=0)
-        self.explain_icon = glyph_label(self.body, app, "warning", 14, "caution")
-        self.explain_icon.pack(side="left", padx=(64, 8), pady=(0, 14), anchor="n")
-        holder = ctk.CTkFrame(self.body, fg_color="transparent")
-        holder.pack(side="left", fill="x", expand=True, padx=(0, 12), pady=(0, 14))
-        self.explain = wrapping(label(holder, "", app.fonts.small, "text"))
-        self.explain.pack(fill="x")
-        self.leave = button(self.body, app, app.t("leave_open"), self._leave)
-        self.show = button(self.body, app, app.t("show_window"), self._show, icon="window")
+            pixmap = app.icon_for(target.exe_path, lambda pix: self.tile.set_pixmap(pix))
+        self.tile = Tile(name, pixmap)
+        top.addWidget(self.tile)
+        texts = vbox()
+        texts.addWidget(label(name, "strong"))
+        texts.addWidget(label(" · ".join([shorten(", ".join(target.titles), 80), app.t("pid", pid=target.pid)]),
+                              "caption", "secondary"))
+        top.addLayout(texts, 1)
+        self.pill = pill()
+        top.addWidget(self.pill, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.body = QWidget()
+        body = hbox((64, 0, 16, 14), 8)
+        self.body.setLayout(body)
+        self.explain_icon = glyph_label("warning", 12, "caution")
+        body.addWidget(self.explain_icon, 0, Qt.AlignmentFlag.AlignTop)
+        self.explain = label("", "small", wrap=True)
+        body.addWidget(self.explain, 1)
+        self.show_button = button(app.t("show_window"), self._show, icon="window")
+        self.leave_button = button(app.t("leave_open"), self._leave)
+        body.addWidget(self.show_button, 0, Qt.AlignmentFlag.AlignTop)
+        body.addWidget(self.leave_button, 0, Qt.AlignmentFlag.AlignTop)
+        outer.addWidget(self.body)
+        self.body.hide()
         self.set_waiting()
 
     def _style(self, text, kind):
-        background, foreground = STATUS_STYLES[kind]
-        self.pill.configure(text=text, fg_color=C[background], text_color=C[foreground])
+        self.pill.setText(text)
+        set_prop(self.pill, "pill", kind)
 
     def set_waiting(self):
         self._style(self.page.app.t("status_waiting"), "neutral")
 
     def set_forcing(self):
         self._style(self.page.app.t("status_forcing"), "neutral")
-        self.body.pack_forget()
+        self.body.hide()
 
     def set_result(self, result):
         app = self.page.app
-        self.body.pack_forget()
+        self.body.hide()
         if result.status == core.CLOSED:
             text = (app.t("status_closed", seconds=format_seconds(app.language, result.elapsed))
                     if result.elapsed >= 0.1 else app.t("log_closed"))
@@ -944,26 +1112,25 @@ class ClosingRow(ctk.CTkFrame):
             self._style(app.t("status_forced"), "caution")
         elif result.status == core.STILL_RUNNING:
             self._style(app.t("status_still"), "caution")
-            self.explain_icon.configure(image=app.glyphs.image("warning", 14, "caution"))
-            self.explain.configure(text=app.t("still_explain", seconds=self.page.timeout))
-            # Packed before the explanation, which takes the width that is left.
-            self.leave.pack(side="right", padx=(0, 16), pady=(0, 14), anchor="n", before=self.explain_icon)
-            self.show.pack(side="right", padx=(0, 8), pady=(0, 14), anchor="n", before=self.explain_icon)
-            self.body.pack(fill="x", padx=2, pady=(0, 2))
+            set_prop(self.explain_icon, "tone", "caution")
+            self.explain.setText(app.t("still_explain", seconds=self.page.timeout))
+            self.show_button.show()
+            self.leave_button.show()
+            self.body.show()
         else:  # FAILED
             self._style(app.t("status_failed"), "critical")
             text = app.t(result.error_key, detail=result.detail) if result.error_key else ""
             if result.error_key == "access_denied" and not app.is_admin:
                 text += "\n" + app.t("admin_hint")
-            self.explain_icon.configure(image=app.glyphs.image("warning", 14, "critical"))
-            self.explain.configure(text=text[:1].upper() + text[1:])
-            self.leave.pack_forget()
-            self.show.pack_forget()
-            self.body.pack(fill="x", padx=2, pady=(0, 2))
+            set_prop(self.explain_icon, "tone", "critical")
+            self.explain.setText(text[:1].upper() + text[1:])
+            self.show_button.hide()
+            self.leave_button.hide()
+            self.body.show()
 
     def set_left_open(self):
         self._style(self.page.app.t("status_left"), "neutral")
-        self.body.pack_forget()
+        self.body.hide()
 
     def _leave(self):
         self.page.leave_open(self.target)
@@ -980,66 +1147,80 @@ class ClosingPage(Page):
         t = app.t
         self.rows, self.results, self.left_open = {}, {}, set()
         self.targets, self.timeout, self.running, self.started = [], 0, False, 0.0
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(2, weight=1)
-
-        head = ctk.CTkFrame(self, fg_color="transparent")
-        head.grid(row=0, column=0, sticky="ew", padx=(PAD - 10, PAD_RIGHT), pady=(20, 0))
-        self.back = button(head, app, t("apps_title"), self.finish, icon="back", style="subtle", height=30,
-                           font=app.fonts.small)
-        self.back.pack(anchor="w")
-        line = ctk.CTkFrame(head, fg_color="transparent")
-        line.pack(fill="x", pady=(8, 0), padx=(10, 0))
-        texts = ctk.CTkFrame(line, fg_color="transparent")
-        texts.pack(side="left", fill="x", expand=True)
-        self.title = label(texts, t("closing_title"), app.fonts.title)
-        self.title.pack(fill="x")
-        self.subtitle = label(texts, "", app.fonts.body, "text2")
-        self.subtitle.pack(fill="x", pady=(2, 0))
-        self.elapsed = label(line, "", app.fonts.caption, "text2")
-        self.elapsed.pack(side="right", anchor="s")
-        self.progress = progress_bar(self, height=4)
-        self.progress.grid(row=1, column=0, sticky="ew", padx=(PAD, PAD_RIGHT), pady=(16, 16))
-
-        self.list = scroll_area(self)
-        self.list.grid(row=2, column=0, sticky="nsew", padx=(PAD - 8, PAD_RIGHT - 16))
-
-        divider(self).grid(row=3, column=0, sticky="ew", padx=(1, OVERHANG))
-        bar = ctk.CTkFrame(self, fg_color="transparent", corner_radius=0)
-        bar.grid(row=4, column=0, sticky="ew", padx=(1, OVERHANG), pady=(0, OVERHANG))
-        texts = self.bar_texts = ctk.CTkFrame(bar, fg_color="transparent")
-        texts.pack(side="left", fill="x", expand=True, padx=(PAD - 1, 16), pady=14)
-        self.summary = wrapping(label(texts, "", app.fonts.body_strong), minimum=80)
-        self.summary.pack(fill="x")
-        wrapping(label(texts, t("closing_hint"), app.fonts.caption, "text2"), minimum=80).pack(fill="x")
-        self.force_button = button(bar, app, "", self.force, style="accent", icon="power", font=app.fonts.body_strong)
-        self.done_button = button(bar, app, t("done"), self.finish)
+        self.ticker = QTimer(self)
+        self.ticker.timeout.connect(self._tick)
+        layout = vbox()
+        self.setLayout(layout)
+        top = vbox((PAD - 10, 20, PAD, 0), 0)
+        layout.addLayout(top)
+        self.back = button(t("apps_title"), self.finish, "subtle", icon="back")
+        top.addWidget(self.back, 0, Qt.AlignmentFlag.AlignLeft)
+        top.addSpacing(8)
+        line = hbox((10, 0, 0, 0), 16)
+        texts = vbox(spacing=2)
+        self.title = label(t("closing_title"), "title")
+        texts.addWidget(self.title)
+        self.subtitle = label("", tone="secondary", wrap=True)
+        texts.addWidget(self.subtitle)
+        line.addLayout(texts, 1)
+        self.elapsed = label("", "caption", "secondary")
+        line.addWidget(self.elapsed, 0, Qt.AlignmentFlag.AlignBottom)
+        top.addLayout(line)
+        top.addSpacing(16)
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 1000)
+        self.progress.setTextVisible(False)
+        progress_row = hbox((10, 0, 0, 0))
+        progress_row.addWidget(self.progress)
+        top.addLayout(progress_row)
+        top.addSpacing(16)
+        area, self.list = scroll_area()
+        self.list_layout = self.list.layout()
+        self.list_layout.setContentsMargins(PAD - 4, 0, PAD - 16, 16)
+        self.list_layout.setSpacing(4)
+        self.list_layout.addStretch(1)
+        layout.addWidget(area, 1)
+        bar = QFrame()
+        bar.setProperty("bar", "true")
+        bar_layout = hbox((PAD, 14, PAD, 16), 8)
+        bar.setLayout(bar_layout)
+        texts = vbox(spacing=2)
+        self.summary = label("", "strong", wrap=True)
+        texts.addWidget(self.summary)
+        texts.addWidget(label(t("closing_hint"), "caption", "secondary", wrap=True))
+        bar_layout.addLayout(texts, 1)
+        self.done_button = button(t("done"), self.finish)
+        bar_layout.addWidget(self.done_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.force_button = button("", self.force, "accent", icon="power")
+        bar_layout.addWidget(self.force_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(bar)
 
     def start(self, targets, timeout):
         self.targets, self.timeout = targets, timeout
         self.results, self.left_open = {}, set()
         for row in self.rows.values():
-            row.destroy()
+            row.deleteLater()
         self.rows = {}
-        for target in targets:
-            row = ClosingRow(self.list, self, target)
-            row.pack(fill="x", padx=(8, 12), pady=(0, 4))
+        for index, target in enumerate(targets):
+            row = ClosingRow(self, target)
+            self.list_layout.insertWidget(index, row)
             self.rows[target.key] = row
-        self.title.configure(text=self.app.t("closing_title"))
-        self.subtitle.configure(text=self.app.tn("closing_subtitle", len(targets)))
-        self.progress.set(0)
+        self.title.setText(self.app.t("closing_title"))
+        self.subtitle.setText(self.app.tn("closing_subtitle", len(targets)))
+        self.progress.setValue(0)
+        self.elapsed.setText("")
         self.started = time.monotonic()
         if timeout:
             self._run(lambda report: core.close_processes(targets, timeout, on_result=report))
         else:
             for row in self.rows.values():
                 row.set_forcing()
-            self.subtitle.configure(text=self.app.tn("forcing_subtitle", len(targets)))
+            self.subtitle.setText(self.app.tn("forcing_subtitle", len(targets)))
             self._run(lambda report: core.force_processes(targets, on_result=report))
-        self._tick()
+        self.ticker.start(200)
 
     def _run(self, work):
-        """Run `work(report)` in a thread; each Result is handed back to the Tk thread."""
+        """Run `work(report)` in a thread; each Result is handed back to the interface thread."""
         self.running = True
         self.app.set_busy(True)
         self._update()
@@ -1057,13 +1238,13 @@ class ClosingPage(Page):
         threading.Thread(target=worker, daemon=True).start()
 
     def _tick(self):
-        if not self.running or not self.winfo_exists():
+        if not self.running:
+            self.ticker.stop()
             return
         elapsed = time.monotonic() - self.started
         if self.timeout:
-            self.progress.set(min(1.0, elapsed / self.timeout))
-            self.elapsed.configure(text=self.app.t("elapsed", elapsed=min(self.timeout, int(elapsed)), seconds=self.timeout))
-        self.after(200, self._tick)
+            self.progress.setValue(int(min(1.0, elapsed / self.timeout) * 1000))
+            self.elapsed.setText(self.app.t("elapsed", elapsed=min(self.timeout, int(elapsed)), seconds=self.timeout))
 
     def _on_result(self, result):
         self.results[result.target.key] = result
@@ -1074,15 +1255,16 @@ class ClosingPage(Page):
 
     def _on_finished(self):
         self.running = False
+        self.ticker.stop()
         self.app.set_busy(False)
         # Applications were just closed: bring the list of open windows up to date by itself.
         self.app.list_page.schedule_refreshes(AFTER_CLOSE_REFRESH_MS)
-        self.progress.set(1)
+        self.progress.setValue(1000)
         if self.timeout:
-            self.elapsed.configure(text=self.app.t("elapsed", elapsed=self.timeout, seconds=self.timeout))
-        self.title.configure(text=self.app.t("closing_done_title"))
+            self.elapsed.setText(self.app.t("elapsed", elapsed=self.timeout, seconds=self.timeout))
+        self.title.setText(self.app.t("closing_done_title"))
         if not self.timeout:
-            self.subtitle.configure(text=self.app.tn("forced_subtitle", len(self.targets)))
+            self.subtitle.setText(self.app.tn("forced_subtitle", len(self.targets)))
         self._update()
 
     def still_running(self):
@@ -1101,21 +1283,17 @@ class ClosingPage(Page):
         parts = [app.tn(f"sum_{name}", count) for name, count in counts.items() if count]
         if waiting:
             parts.append(app.tn("sum_waiting", waiting))
-        self.summary.configure(text=" · ".join(parts))
+        self.summary.setText(" · ".join(parts))
         still = self.still_running()
-        self.force_button.pack_forget()
-        self.done_button.pack_forget()
         if still and not self.running:
             text = (app.t("force_one_named", name=app.display_name(still[0].exe_path) or app.t("process_n", pid=still[0].pid))
                     if len(still) == 1 else app.t("force_count", count=len(still)))
-            self.force_button.configure(text=text)
-            # Before the texts in the packing order: the buttons keep their full width.
-            self.force_button.pack(side="right", padx=(0, PAD), pady=16, before=self.bar_texts)
-            self.done_button.pack(side="right", padx=(0, 8), pady=16, before=self.bar_texts)
+            self.force_button.setText(text)
+            self.force_button.show()
         else:
-            self.done_button.pack(side="right", padx=(0, PAD), pady=16, before=self.bar_texts)
-        set_enabled(self.done_button, not self.running)
-        set_enabled(self.back, not self.running)
+            self.force_button.hide()
+        self.done_button.setEnabled(not self.running)
+        self.back.setEnabled(not self.running)
 
     def leave_open(self, target):
         self.left_open.add(target.key)
@@ -1135,7 +1313,7 @@ class ClosingPage(Page):
     def finish(self):
         if self.running:
             return
-        self.app.show("apps")
+        self.app.show_page("apps")
         self.app.list_page.refresh()
 
 
@@ -1171,18 +1349,18 @@ class LogPage(Page):
     def __init__(self, app):
         super().__init__(app)
         t = app.t
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=1)
-        header, texts = page_header(self, app, t("log_title"))
-        label(texts, str(settings_mod.log_path()), app.fonts.body, "text2").pack(fill="x", pady=(2, 0))
-        actions = ctk.CTkFrame(header, fg_color="transparent")
-        actions.pack(side="right", anchor="n", pady=(4, 0))
-        button(actions, app, t("log_open_file"), self.open_file, icon="open").pack(side="right")
-        button(actions, app, t("refresh"), self.load, icon="refresh").pack(side="right", padx=(0, 8))
-        self.text = ctk.CTkTextbox(self, font=app.fonts.mono, fg_color=C["card"], border_color=C["card_border"],
-                                   border_width=1, corner_radius=4, text_color=C["text"], wrap="none",
-                                   scrollbar_button_color=C["text3"], scrollbar_button_hover_color=C["text2"])
-        self.text.grid(row=1, column=0, sticky="nsew", padx=(PAD, PAD_RIGHT), pady=(0, 28 + OVERHANG))
+        layout = vbox((PAD, 28, PAD, 28), 0)
+        self.setLayout(layout)
+        header, texts, actions = page_header(t("log_title"))
+        texts.addWidget(label(str(settings_mod.log_path()), tone="secondary"))
+        actions.addWidget(button(t("refresh"), self.load, icon="refresh"), 0, Qt.AlignmentFlag.AlignTop)
+        actions.addWidget(button(t("log_open_file"), self.open_file, icon="open"), 0, Qt.AlignmentFlag.AlignTop)
+        layout.addLayout(header)
+        layout.addSpacing(20)
+        self.text = QPlainTextEdit()
+        self.text.setReadOnly(True)
+        self.text.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        layout.addWidget(self.text, 1)
 
     def load(self):
         try:
@@ -1191,11 +1369,8 @@ class LogPage(Page):
         except OSError:
             lines = []
         text = "\n".join(format_log_line(self.app, line) for line in lines if line.strip()) or self.app.t("log_empty")
-        self.text.configure(state="normal")
-        self.text.delete("1.0", "end")
-        self.text.insert("1.0", text)
-        self.text.configure(state="disabled")
-        self.text.see("end")
+        self.text.setPlainText(text)
+        self.text.verticalScrollBar().setValue(self.text.verticalScrollBar().maximum())
 
     def open_file(self):
         path = settings_mod.log_path()
@@ -1211,29 +1386,34 @@ class BackgroundPage(Page):
     def __init__(self, app):
         super().__init__(app)
         t = app.t
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(2, weight=1)
-        header, titles = page_header(self, app, t("background_title"))
-        self.summary = label(titles, "", app.fonts.body, "text2")
-        self.summary.pack(fill="x", pady=(2, 0))
-        button(header, app, t("refresh"), self.load, icon="refresh").pack(side="right", anchor="n", pady=(4, 0))
-
-        options = ctk.CTkFrame(self, fg_color="transparent")
-        options.grid(row=1, column=0, sticky="ew", padx=(PAD, PAD_RIGHT), pady=(0, 12))
-        self.include_system = ctk.BooleanVar(value=app.settings["background_include_system"])
-        _box, right, _texts = settings_card(options, app, "monitor", t("background_include_system"),
-                                            t("background_include_system_hint"))
-        Toggle(right, self.include_system, self._on_include_system).pack(side="right")
-        self.hint = infobar(options, app, t("background_hint"))
-        self.hint.pack(fill="x", pady=(8, 0))
-
-        self.list = scroll_area(self)
-        self.list.grid(row=2, column=0, sticky="nsew", padx=(PAD - 8, PAD_RIGHT - 16), pady=(0, 16 + OVERHANG))
+        layout = vbox()
+        self.setLayout(layout)
+        top = vbox((PAD, 28, PAD, 0), 8)
+        layout.addLayout(top)
+        header, titles, actions = page_header(t("background_title"))
+        self.summary = label("", tone="secondary", wrap=True)
+        titles.addWidget(self.summary)
+        actions.addWidget(button(t("refresh"), self.load, icon="refresh"), 0, Qt.AlignmentFlag.AlignTop)
+        top.addLayout(header)
+        top.addSpacing(12)
+        self.include_system = toggle_with_state(app, app.settings["background_include_system"],
+                                                self._on_include_system)
+        settings_card("monitor", t("background_include_system"), t("background_include_system_hint"),
+                      self.include_system, top)
+        self.hint = infobar(t("background_hint"))
+        top.addWidget(self.hint)
+        top.addSpacing(8)
+        area, self.list = scroll_area()
+        self.list_layout = self.list.layout()
+        self.list_layout.setContentsMargins(PAD - 4, 0, PAD - 16, 16)
+        self.list_layout.setSpacing(4)
+        self.list_layout.addStretch(1)
+        layout.addWidget(area, 1)
         self.report = None
         self.generation = 0   # the latest read; older ones arriving late are dropped
 
-    def _on_include_system(self):
-        self.app.update_settings(background_include_system=bool(self.include_system.get()))
+    def _on_include_system(self, value):
+        self.app.update_settings(background_include_system=value)
         self.load()
 
     def load(self):
@@ -1255,58 +1435,65 @@ class BackgroundPage(Page):
     def _show(self, generation, result):
         if generation != self.generation:
             return
-        try:
-            if not self.winfo_exists():
-                return
-        except tk.TclError:
-            return   # page rebuilt meanwhile (language change)
         app, t = self.app, self.app.t
-        for child in self.list.winfo_children():
-            child.destroy()
+        layout = self.list_layout
+        while layout.count() > 1:
+            item = layout.takeAt(0)
+            if item.widget() is not None:
+                item.widget().deleteLater()
         if isinstance(result, Exception):
             self.report = None
-            self.summary.configure(text=t("background_error", error=result))
+            self.summary.setText(t("background_error", error=result))
             return
         self.report = report = result
         if not report.top:
-            self.summary.configure(text=t("background_empty"))
+            self.summary.setText(t("background_empty"))
             return
         total = format_memory(app.language, report.total)
-        self.summary.configure(text=f"{app.tn('background_top', len(report.top))} · "
-                                    f"{app.tn('background_count', report.count, total=total)}")
+        self.summary.setText(f"{app.tn('background_top', len(report.top))} · "
+                             f"{app.tn('background_count', report.count, total=total)}")
         largest = max(report.top[0].memory, 1)
         app.preload_icons(p.exe_path for p in report.top)
         for rank, process in enumerate(report.top, 1):
-            self._row(rank, process, largest)
+            layout.insertWidget(rank - 1, self._row(rank, process, largest))
 
     def _row(self, rank, process, largest):
         app = self.app
-        box = card(self.list)
-        box.pack(fill="x", padx=(8, 12), pady=(0, 4))
-        row = ctk.CTkFrame(box, fg_color="transparent")
-        row.pack(fill="x", padx=(12, 16), pady=12)
-        label(row, str(rank), app.fonts.caption, "text2", width=22, anchor="e").pack(side="left", padx=(0, 14))
+        box = card()
+        row = hbox((12, 12, 16, 12), 16)
+        box.setLayout(row)
+        number = label(str(rank), "caption", "secondary")
+        number.setFixedWidth(20)
+        number.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        row.addWidget(number)
         name = app.display_name(process.exe_path) if process.exe_path else process.app_name
-        tile_box = tile(row, app, name, None, process.protected)
-        tile_box.pack(side="left", padx=(0, 16))
+        tile = Tile(name, None, process.protected)
         if process.exe_path and app.settings["show_icons"]:
-            set_tile_icon(tile_box, app.icon_for(process.exe_path,
-                                                 on_ready=lambda image, b=tile_box: set_tile_icon(b, image)))
-        memory = ctk.CTkFrame(row, fg_color="transparent")
-        memory.pack(side="right", padx=(16, 0))
-        label(memory, format_memory(app.language, process.memory), app.fonts.body_strong, anchor="e").pack(fill="x")
-        bar = progress_bar(memory, width=160, height=4)
-        bar.set(process.memory / largest)
-        bar.pack(pady=(6, 2))
-        texts = ctk.CTkFrame(row, fg_color="transparent")
-        texts.pack(side="left", fill="x", expand=True)
-        line = ctk.CTkFrame(texts, fg_color="transparent")
-        line.pack(fill="x")
-        label(line, name, app.fonts.body_strong, "text2" if process.protected else "text").pack(side="left")
+            tile.set_pixmap(app.icon_for(process.exe_path, on_ready=tile.set_pixmap))
+        row.addWidget(tile)
+        texts = vbox()
+        line = hbox(spacing=8)
+        line.addWidget(label(name, "strong", "secondary" if process.protected else None))
         if process.protected:
-            ctk.CTkLabel(line, text=app.t("protected_badge"), font=app.fonts.caption, height=20, corner_radius=4,
-                         fg_color=C["neutral_bg"], text_color=C["text2"], padx=6).pack(side="left", padx=(8, 0))
-        label(texts, f"{process.name} · {app.t('pid', pid=process.pid)}", app.fonts.caption, "text2").pack(fill="x")
+            badge = label(app.t("protected_badge"))
+            badge.setProperty("badge", "true")
+            line.addWidget(badge)
+        line.addStretch(1)
+        texts.addLayout(line)
+        texts.addWidget(label(f"{process.name} · {app.t('pid', pid=process.pid)}", "caption", "secondary"))
+        row.addLayout(texts, 1)
+        memory = vbox(spacing=6)
+        size = label(format_memory(app.language, process.memory), "strong")
+        size.setAlignment(Qt.AlignmentFlag.AlignRight)
+        memory.addWidget(size)
+        bar = QProgressBar()
+        bar.setRange(0, 1000)
+        bar.setValue(int(process.memory / largest * 1000))
+        bar.setTextVisible(False)
+        bar.setFixedWidth(160)
+        memory.addWidget(bar)
+        row.addLayout(memory)
+        return box
 
 
 # ====================================================================== settings
@@ -1315,122 +1502,133 @@ class SettingsPage(Page):
     def __init__(self, app):
         super().__init__(app)
         t, s = app.t, app.settings
-        self.save_job = None
-        scroll = self.scroll = scroll_area(self)
-        scroll.pack(fill="both", expand=True, padx=(PAD - 12, OVERHANG + 4), pady=(0, OVERHANG))
-        content = ctk.CTkFrame(scroll, fg_color="transparent")
-        content.pack(fill="both", expand=True, padx=(12, 20), pady=(28, 28))
-        label(content, t("settings_title"), app.fonts.title).pack(fill="x")
-        wrapping(label(content, t("settings_subtitle", path=settings_mod.data_dir()), app.fonts.body, "text2")).pack(
-            fill="x", pady=(2, 8))
+        layout = vbox()
+        self.setLayout(layout)
+        self.scroll, content = scroll_area()
+        layout.addWidget(self.scroll)
+        body = content.layout()
+        body.setContentsMargins(PAD, 28, PAD - 12, 36)
+        body.setSpacing(4)
+        body.addWidget(label(t("settings_title"), "title"))
+        body.addWidget(label(t("settings_subtitle", path=settings_mod.data_dir()), tone="secondary", wrap=True))
+        body.addSpacing(8)
 
         # ---- display
-        section_header(content, app, t("section_display"))
+        section_header(t("section_display"), body)
         self.language_values = list(LANGUAGE_NAMES.items())
-        _box, right, _ = settings_card(content, app, "globe", t("language"), t("language_hint"))
-        language = combo(right, app, [name for _, name in self.language_values], self._on_language)
-        language.set(LANGUAGE_NAMES[s["language"]])
-        language.pack()
+        language = ComboBox([name for _, name in self.language_values])
+        language.setCurrentText(LANGUAGE_NAMES[s["language"]])
+        language.currentTextChanged.connect(self._on_language)
+        settings_card("globe", t("language"), t("language_hint"), language, body)
         self.theme_values = [(code, t(f"theme_{code}")) for code in settings_mod.THEMES]
-        _box, right, _ = settings_card(content, app, "color", t("theme"), t("theme_hint"))
-        theme = combo(right, app, [name for _, name in self.theme_values], self._on_theme)
-        theme.set(dict(self.theme_values)[s["theme"]])
-        theme.pack()
-        supported = app.mica_supported
-        _box, right, _ = settings_card(content, app, "transparency", t("mica"),
-                                       t("mica_hint") if supported else t("mica_unavailable"))
-        self._toggle(right, "mica", enabled=supported)
+        theme = ComboBox([name for _, name in self.theme_values])
+        theme.setCurrentText(dict(self.theme_values)[s["theme"]])
+        theme.currentTextChanged.connect(self._on_theme)
+        settings_card("color", t("theme"), t("theme_hint"), theme, body)
+        supported = app.translucent
+        self.mica_toggle = toggle_with_state(app, s["mica"] and supported,
+                                             lambda value: app.update_settings(mica=value), enabled=supported)
+        settings_card("transparency", t("mica"), t("mica_hint") if supported else t("mica_unavailable"),
+                      self.mica_toggle, body)
 
         # ---- closing
-        section_header(content, app, t("section_closing"))
-        self._switch_card(content, "check", "confirm_before_terminate", t("confirm_before_terminate"), t("confirm_hint"))
-        self._switch_card(content, "lightning", "instant_force", t("instant_force"), t("instant_force_hint"))
-        _box, right, _ = settings_card(content, app, "timer", t("close_timeout"), t("timeout_hint"))
-        self.timeout_value = label(right, t("seconds_value", seconds=s["close_timeout"]), app.fonts.body, width=44,
-                                   anchor="e")
-        self.timeout_value.pack(side="right", padx=(12, 0))
-        slider = ctk.CTkSlider(right, from_=settings_mod.TIMEOUT_MIN, to=settings_mod.TIMEOUT_MAX, width=200, height=20,
-                               number_of_steps=settings_mod.TIMEOUT_MAX - settings_mod.TIMEOUT_MIN,
-                               command=self._on_timeout, progress_color=C["accent"], button_color=C["accent"],
-                               button_hover_color=C["accent_hover"], fg_color=C["control_strong"])
-        slider.set(s["close_timeout"])
-        slider.pack(side="right")
+        section_header(t("section_closing"), body)
+        self._switch_card(body, "check", "confirm_before_terminate", t("confirm_before_terminate"), t("confirm_hint"))
+        self._switch_card(body, "lightning", "instant_force", t("instant_force"), t("instant_force_hint"))
+        delay = QWidget()
+        delay_layout = hbox(spacing=12)
+        delay.setLayout(delay_layout)
+        self.timeout_slider = QSlider(Qt.Orientation.Horizontal)
+        self.timeout_slider.setRange(settings_mod.TIMEOUT_MIN, settings_mod.TIMEOUT_MAX)
+        self.timeout_slider.setValue(s["close_timeout"])
+        self.timeout_slider.setFixedWidth(200)
+        self.timeout_value = label(t("seconds_value", seconds=s["close_timeout"]))
+        self.timeout_value.setFixedWidth(40)
+        self.timeout_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        delay_layout.addWidget(self.timeout_slider)
+        delay_layout.addWidget(self.timeout_value)
+        self.save_timer = QTimer(self)
+        self.save_timer.setSingleShot(True)
+        self.save_timer.timeout.connect(lambda: app.update_settings(close_timeout=self.timeout_slider.value()))
+        self.timeout_slider.valueChanged.connect(self._on_timeout)
+        settings_card("timer", t("close_timeout"), t("timeout_hint"), delay, body)
 
         # ---- window list
-        section_header(content, app, t("section_list"))
-        self._switch_card(content, "list", "group_by_app", t("group_by_app"), t("group_hint"))
-        self._switch_card(content, "image", "show_icons", t("show_icons"), t("icons_hint"))
+        section_header(t("section_list"), body)
+        self._switch_card(body, "list", "group_by_app", t("group_by_app"), t("group_hint"))
+        self._switch_card(body, "image", "show_icons", t("show_icons"), t("icons_hint"))
 
         # ---- shortcut
-        section_header(content, app, t("section_shortcut"))
-        box, right, texts = settings_card(content, app, "link", t("shortcut_card"), t("shortcut_hint"))
-        self.pin_button = button(right, app, t("shortcut_pin"), self._pin_shortcut, icon="pin")
-        self.pin_button.pack(side="right")
-        button(right, app, t("shortcut_create"), self._create_shortcut).pack(side="right", padx=(0, 8))
-        self.shortcut_status = wrapping(label(texts, "", app.fonts.caption, "text2"))
-        self.shortcut_status.pack(fill="x", pady=(4, 0))
+        section_header(t("section_shortcut"), body)
+        buttons = QWidget()
+        buttons_layout = hbox(spacing=8)
+        buttons.setLayout(buttons_layout)
+        buttons_layout.addWidget(button(t("shortcut_create"), self._create_shortcut))
+        self.pin_button = button(t("shortcut_pin"), self._pin_shortcut, icon="pin")
+        buttons_layout.addWidget(self.pin_button)
+        shortcut_card = settings_card("link", t("shortcut_card"), t("shortcut_hint"), buttons, body)
+        self.shortcut_status = label("", "caption", "secondary", wrap=True)
+        shortcut_card.texts.addWidget(self.shortcut_status)
         # Named in the language of its creation: look for every language's name, current first.
         self.shortcut_file = shortcut.find_any([t("shortcut_name")] + [
-            texts_["shortcut_name"] for code, texts_ in TEXT.items() if code != app.language])
+            texts["shortcut_name"] for code, texts in TEXT.items() if code != app.language])
         self._show_shortcut_status()
 
         # ---- about
-        section_header(content, app, t("section_about"))
-        about = card(content)
-        about.pack(fill="x", pady=(0, 4))
-        head = ctk.CTkFrame(about, fg_color="transparent")
-        head.pack(fill="x", padx=16, pady=14)
-        logo = app.app_logo(32)
-        ctk.CTkLabel(head, text="", image=logo, width=32).pack(side="left", padx=(0, 14))
-        project = ctk.CTkLabel(head, text=updater.PROJECT_PAGE.removeprefix("https://"), font=app.fonts.body,
-                               text_color=C["link"], cursor="hand2", anchor="e")
-        project.pack(side="right")
-        project.bind("<Button-1>", lambda _e: self._open_project())
-        names = ctk.CTkFrame(head, fg_color="transparent")
-        names.pack(side="left", fill="x", expand=True)
-        label(names, "CloseAllPython", app.fonts.body_strong).pack(fill="x")
-        label(names, t("about_line", version=__version__), app.fonts.caption, "text2").pack(fill="x")
-
+        section_header(t("section_about"), body)
+        about = card()
+        about_layout = vbox()
+        about.setLayout(about_layout)
+        head = hbox((16, 14, 16, 14), 16)
+        logo = QLabel()
+        logo.setPixmap(QIcon(resource_path("app.ico")).pixmap(32, 32))
+        logo.setFixedSize(32, 32)
+        head.addWidget(logo)
+        names = vbox()
+        names.addWidget(label("CloseAllPython", "strong"))
+        names.addWidget(label(t("about_line", version=__version__), "caption", "secondary"))
+        head.addLayout(names, 1)
+        project = button(updater.PROJECT_PAGE.removeprefix("https://"), self._open_project, "link")
+        project.setCursor(Qt.CursorShape.PointingHandCursor)
+        head.addWidget(project)
+        about_layout.addLayout(head)
         rights = t("rights_admin") if app.is_admin else t("rights_user")
-        row = self._about_row(about, t("rights_line", rights=rights))
+        row = self._about_row(about_layout, t("rights_line", rights=rights))
         if not app.is_admin:
-            button(row, app, t("admin_restart"), app.restart_as_admin, icon="shield").pack(side="right")
-        row = self._about_row(about, t("log_line", name=settings_mod.log_path().name))
-        button(row, app, t("open_log"), lambda: app.show("log")).pack(side="right")
-        row = self._about_row(about, t("log_window_titles"), t("log_window_titles_hint"))
-        self._toggle(row, "log_window_titles")
-        row = self._about_row(about, t("auto_update"), t("auto_update_hint"))
-        self._toggle(row, "auto_update")
-        self.check_button = button(row, app, t("check_updates"), app.updates.check, icon="sync")
-        self.check_button.pack(side="right", padx=(0, 16))
-        self.update_status = wrapping(label(row.texts, "", app.fonts.caption, "text2"))
-        self.update_status.pack(fill="x")
+            row.addWidget(button(t("admin_restart"), app.restart_as_admin, icon="shield"))
+        row = self._about_row(about_layout, t("log_line", name=settings_mod.log_path().name))
+        row.addWidget(button(t("open_log"), lambda: app.show_page("log")))
+        row = self._about_row(about_layout, t("log_window_titles"), t("log_window_titles_hint"))
+        row.addWidget(toggle_with_state(app, s["log_window_titles"],
+                                        lambda value: app.update_settings(log_window_titles=value)))
+        row = self._about_row(about_layout, t("auto_update"), t("auto_update_hint"))
+        self.check_button = button(t("check_updates"), app.updates.check, icon="sync")
+        row.addWidget(self.check_button)
+        row.addSpacing(8)
+        row.addWidget(toggle_with_state(app, s["auto_update"], lambda value: app.update_settings(auto_update=value)))
+        self.update_status = label("", "caption", "secondary", wrap=True)
+        row.texts.addWidget(self.update_status)
+        body.addWidget(about)
+        body.addStretch(1)
         app.updates.on_status = self._show_update_status
         self._show_update_status()
 
-    def _about_row(self, about, title, description=None):
-        divider(about).pack(fill="x", padx=1)
-        row = ctk.CTkFrame(about, fg_color="transparent")
-        row.pack(fill="x", padx=(62, 16), pady=10)
-        texts = ctk.CTkFrame(row, fg_color="transparent")
-        texts.pack(side="left", fill="x", expand=True)
-        label(texts, title, self.app.fonts.body).pack(fill="x")
+    def _about_row(self, about_layout, title, description=None):
+        about_layout.addWidget(divider())
+        row = hbox((64, 10, 16, 10), 12)
+        texts = vbox()
+        texts.addWidget(label(title))
         if description:
-            wrapping(label(texts, description, self.app.fonts.caption, "text2")).pack(fill="x")
+            texts.addWidget(label(description, "caption", "secondary", wrap=True))
+        row.addLayout(texts, 1)
         row.texts = texts
+        about_layout.addLayout(row)
         return row
 
-    def _toggle(self, master, key, enabled=True):
-        variable = ctk.BooleanVar(value=self.app.settings[key] and enabled)
-        toggle = Toggle(master, variable, lambda: self.app.update_settings(**{key: bool(variable.get())}))
-        if not enabled:
-            toggle.configure(state="disabled")
-        toggle.pack(side="right")
-        return toggle
-
-    def _switch_card(self, master, glyph, key, title, hint):
-        _box, right, _texts = settings_card(master, self.app, glyph, title, hint)
-        return self._toggle(right, key)
+    def _switch_card(self, body, glyph, key, title, hint):
+        control = toggle_with_state(self.app, self.app.settings[key],
+                                    lambda value: self.app.update_settings(**{key: value}))
+        return settings_card(glyph, title, hint, control, body)
 
     def _open_project(self):
         import webbrowser
@@ -1439,12 +1637,9 @@ class SettingsPage(Page):
 
     def _show_shortcut_status(self):
         file = self.shortcut_file
-        self.shortcut_status.configure(text=self.app.t("shortcut_ready", path=file) if file else "")
-        if file:
-            self.shortcut_status.pack(fill="x", pady=(4, 0))
-        else:
-            self.shortcut_status.pack_forget()
-        set_enabled(self.pin_button, bool(file))
+        self.shortcut_status.setText(self.app.t("shortcut_ready", path=file) if file else "")
+        self.shortcut_status.setVisible(bool(file))
+        self.pin_button.setEnabled(bool(file))
 
     def _create_shortcut(self):
         t = self.app.t
@@ -1473,13 +1668,10 @@ class SettingsPage(Page):
         updates = self.app.updates
         try:
             text = updates.status_text()
-            self.update_status.configure(text=text)
-            if text:
-                self.update_status.pack(fill="x")
-            else:
-                self.update_status.pack_forget()
-            set_enabled(self.check_button, not (updates.running or updates.installed))
-        except tk.TclError:
+            self.update_status.setText(text)
+            self.update_status.setVisible(bool(text))
+            self.check_button.setEnabled(not (updates.running or updates.installed))
+        except RuntimeError:
             pass   # page destroyed (language change): the new page registers itself
 
     def _on_language(self, value):
@@ -1491,17 +1683,14 @@ class SettingsPage(Page):
         self.app.update_settings(theme=code)
 
     def _on_timeout(self, value):
-        seconds = int(round(value))
-        self.timeout_value.configure(text=self.app.t("seconds_value", seconds=seconds))
-        if self.save_job is not None:
-            self.after_cancel(self.save_job)
-        self.save_job = self.after(300, lambda: self.app.update_settings(close_timeout=seconds))
+        self.timeout_value.setText(self.app.t("seconds_value", seconds=value))
+        self.save_timer.start(300)
 
 
 # ====================================================================== updates
 
 class Updates:
-    """Checks GitHub for a newer release and installs it, off the Tk thread.
+    """Checks GitHub for a newer release and installs it, off the interface thread.
 
     Manual check (Settings): asks before installing, then restarts into the new version.
     Automatic check (startup, when enabled): installs silently and offers to restart; the new
@@ -1619,100 +1808,119 @@ class Updates:
         except OSError as exc:
             Dialog(self.app, self.app.t("error"), self.app.t("update_failed", error=exc))
             return
-        self.app.destroy()
+        self.app.close()
 
 
 # ====================================================================== window
 
-class NavItem(ctk.CTkFrame):
+class NavItem(QAbstractButton, Painted):
     """A NavigationView item: icon and label; the selected one gets a fill and an accent mark."""
 
-    def __init__(self, master, app, name, glyph, text):
-        super().__init__(master, fg_color="transparent", corner_radius=4, height=36)
-        self.app, self.name, self.active = app, name, False
-        self.pack_propagate(False)
-        self.mark = ctk.CTkFrame(self, width=3, height=16, corner_radius=2, fg_color=C["accent"])
-        self.icon = glyph_label(self, app, glyph, 16, width=20)
-        self.icon.pack(side="left", padx=(14, 14))
-        self.text = label(self, text, app.fonts.body)
-        self.text.pack(side="left", fill="x", expand=True)
-        for widget in (self, self.icon, self.text):
-            widget.bind("<Button-1>", lambda _e: app.show(name))
-            widget.bind("<Enter>", lambda _e: self._hover(True))
-            widget.bind("<Leave>", lambda _e: self._hover(False))
-
-    def _hover(self, inside):
-        if not self.active:
-            self.configure(fg_color=C["nav_hover"] if inside else "transparent")
-
-    def set_active(self, active):
-        self.active = active
-        self.configure(fg_color=C["nav_selected"] if active else "transparent")
-        if active:
-            self.mark.place(x=0, rely=0.5, anchor="w")
-        else:
-            self.mark.place_forget()
+    def __init__(self, glyph, text):
+        super().__init__()
+        self.glyph, self.compact = glyph, False
+        self.setText(text)
+        self.setCheckable(True)
+        self.setAutoExclusive(True)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover)
+        self.setFixedHeight(36)
+        self.setToolTip(text)
 
     def set_compact(self, compact):
-        if compact:
-            self.text.pack_forget()
-        else:
-            self.text.pack(side="left", fill="x", expand=True)
+        self.compact = compact
+        self.update()
+
+    def paintEvent(self, _event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        rect = QRectF(self.rect())
+        if self.isChecked() or self.underMouse():
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(qcolor("subtle_pressed" if self.isDown() else "subtle_hover"))
+            painter.drawRoundedRect(rect, 4, 4)
+        if self.isChecked():
+            painter.setBrush(qcolor("accent"))
+            painter.drawRoundedRect(QRectF(0, self.height() / 2 - 8, 3, 16), 1.5, 1.5)
+        painter.setPen(qcolor("text"))
+        painter.setFont(glyph_font(16))
+        painter.drawText(QRectF(12, 0, 20, self.height()), Qt.AlignmentFlag.AlignCenter, THEME.glyph(self.glyph))
+        if not self.compact:
+            font = QFont(THEME.ui_font)
+            font.setPixelSize(14)
+            painter.setFont(font)
+            painter.drawText(QRectF(48, 0, self.width() - 52, self.height()),
+                             Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self.text())
+        painter.end()
 
 
-class App(ctk.CTk):
+class Dispatcher(QObject):
+    """Runs callables on the interface thread, whatever thread asks."""
+
+    call = Signal(object)
+
+
+def pick_font(families, *names, default):
+    return next((name for name in names if name in families), default)
+
+
+class App(QMainWindow):
     def __init__(self):
+        self.qapp = QApplication.instance() or QApplication(sys.argv[:1])
+        self.qapp.setStyle("Fusion")
+        super().__init__()
         self.settings = settings_mod.load_settings()
+        core.log_titles = self.settings["log_window_titles"]
         try:
             self.mica_supported = bool(winapi.backdrop_supported())
         except Exception:
             self.mica_supported = False
-        self.mica = self.settings["mica"] and self.mica_supported
-        apply_palette(self.mica)
-        super().__init__(fg_color=C["bg"])
-        core.log_titles = self.settings["log_window_titles"]
-        ctk.set_appearance_mode(self.settings["theme"])
+        # Qt needs a translucent window before it exists; whether Mica shows is decided later.
+        self.translucent = self.mica_supported
+        if self.translucent:
+            self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.mica = False
         self.is_admin = winapi.is_admin()
         self.own_pids = core.own_pids(include_ancestors=False)
-        self.icon_cache = {}          # lower-case path -> CTkImage or None
+        self.icon_cache = {}          # lower-case path -> QPixmap or None
         self.icon_waiters = {}        # lower-case path -> callbacks waiting for that icon
         self.icon_pending = set()     # lower-case paths queued for extraction
         self.icon_jobs = None         # queue of paths for the icon thread (started on first use)
-        self.dialogs = 0              # open Dialog windows
+        self.dialogs = 0              # open dialogs
         self.names = {}
-        self.callbacks = queue.Queue()
         self.busy = False
         self.current = "apps"
         self.nav_compact = False
-        self.appearance = None        # theme the backdrop was last set for
-        self._logos = {}
-        self.title(f"CloseAllPython {__version__}")
-        self.geometry("1180x740")
-        self.minsize(860, 580)
+        self.dispatcher = Dispatcher()
+        self.dispatcher.call.connect(self._run_call, Qt.ConnectionType.QueuedConnection)
+        families = set(QFontDatabase.families())
+        default = self.qapp.font().family()
+        self.fonts = {
+            "ui_font": pick_font(families, "Segoe UI Variable Text", "Segoe UI", default=default),
+            "display_font": pick_font(families, "Segoe UI Variable Display", "Segoe UI Variable Text", "Segoe UI",
+                                      default=default),
+            "mono_font": pick_font(families, "Cascadia Mono", "Consolas", "DejaVu Sans Mono", default="monospace"),
+            "icon_font": pick_font(families, *ICON_FAMILIES, default=None),
+        }
         try:
-            self.iconbitmap(resource_path("app.ico"))
-        except tk.TclError:
-            pass
-        self.window_icon = WindowIcon(self)   # replaces Tk's 16/32 px icons with sharp ones
-        self.fonts = Fonts(self)
-        try:
-            windows_dir = winapi.windows_directory()
+            self.accent = accent_shades(winapi.accent_palette())
         except Exception:
-            windows_dir = None
-        self.glyphs = Glyphs(windows_dir)
-        self.grid_columnconfigure(1, weight=1)
-        self.grid_rowconfigure(0, weight=1)
-        self.nav_pane = None
-        self.list_page = None
+            self.accent = accent_shades(None)
+        self.setWindowTitle(f"CloseAllPython {__version__}")
+        self.setWindowIcon(QIcon(resource_path("app.ico")))
+        self.resize(1180, 760)
+        self.setMinimumSize(880, 600)
         self.updates = Updates(self)
         updater.cleanup()   # leftovers of an update installed by the previous run
+        self.list_page = None
+        self.apply_theme(native=False)
         self.build()
-        self.bind("<F5>", lambda _e: self.list_page.refresh() if self.current == "apps" else None)
-        self.bind("<Control-f>", lambda _e: (self.show("apps"), self.list_page.focus_search()))
-        self.after(POLL_MS, self._poll)
-        self.after(50, self.apply_backdrop)
+        QShortcut(QKeySequence("F5"), self, lambda: self.list_page.refresh() if self.current == "apps" else None)
+        QShortcut(QKeySequence("Ctrl+F"), self, lambda: (self.show_page("apps"), self.list_page.focus_search()))
+        hints = QGuiApplication.styleHints()
+        if hasattr(hints, "colorSchemeChanged"):
+            hints.colorSchemeChanged.connect(self._system_theme_changed)
         if self.settings["auto_update"] and updater.current_executable() is not None:
-            self.after(UPDATE_STARTUP_DELAY_MS, lambda: self.updates.check(automatic=True))
+            self.later(UPDATE_STARTUP_DELAY_MS, lambda: self.updates.check(automatic=True))
 
     # ---------------------------------------------------------------- helpers
     @property
@@ -1726,26 +1934,26 @@ class App(ctk.CTk):
         return translate_n(self.language, key, count, **values)
 
     def call_soon(self, callback):
-        """Thread-safe: run `callback` on the Tk thread."""
-        self.callbacks.put(callback)
+        """Thread-safe: run `callback` on the interface thread."""
+        self.dispatcher.call.emit(callback)
 
-    def _poll(self):
-        while True:
-            try:
-                callback = self.callbacks.get_nowait()
-            except queue.Empty:
-                break
-            try:
-                callback()
-            except Exception:
-                self.report_callback_exception(*sys.exc_info())
-        if self.mica and ctk.get_appearance_mode() != self.appearance:
-            self.apply_backdrop()   # Windows (or the setting) switched between light and dark
-        self.after(POLL_MS, self._poll)
+    def _run_call(self, callback):
+        try:
+            callback()
+        except Exception:
+            self.report_callback_exception(*sys.exc_info())
+
+    def later(self, ms, callback, owner=None):
+        """A single-shot timer that can be stopped."""
+        timer = QTimer(owner or self)
+        timer.setSingleShot(True)
+        timer.timeout.connect(callback)
+        timer.start(ms)
+        return timer
 
     def report_callback_exception(self, exc, value, tb):
-        """Tk calls this when an interface callback raises: save the details and say so,
-        instead of a silent failure (the windowed executable has no console)."""
+        """An interface callback raised: save the details and say so, instead of a silent
+        failure (the windowed executable has no console)."""
         import traceback
 
         details = "".join(traceback.format_exception(exc, value, tb))
@@ -1776,22 +1984,11 @@ class App(ctk.CTk):
             self.names[key] = shorten(name, 40) if name else ntpath.splitext(ntpath.basename(exe_path))[0]
         return self.names[key]
 
-    def app_logo(self, size):
-        """CloseAllPython's own icon as a CTkImage (None if the .ico cannot be read)."""
-        if size not in self._logos:
-            try:
-                picture = appicon.icon_image(resource_path("app.ico"), size * 2)
-                self._logos[size] = ctk.CTkImage(light_image=picture, dark_image=mica_image(picture),
-                                                 size=(size, size))
-            except Exception:
-                self._logos[size] = None
-        return self._logos[size]
-
     def icon_for(self, exe_path, on_ready=None):
-        """CTkImage of an executable's icon if already extracted, else None.
+        """QPixmap of an executable's icon if already extracted, else None.
 
         Icons are extracted on a background thread so the window never waits on the disk;
-        `on_ready(image)` is called on the Tk thread once this one is available.
+        `on_ready(pixmap)` is called on the interface thread once this one is available.
         """
         if not exe_path:
             return None
@@ -1810,6 +2007,8 @@ class App(ctk.CTk):
                 self._request_icon(path)
 
     def _request_icon(self, exe_path):
+        import queue
+
         key = exe_path.lower()
         if key in self.icon_pending:
             return
@@ -1832,87 +2031,144 @@ class App(ctk.CTk):
     def _icon_ready(self, exe_path, picture):
         key = exe_path.lower()
         self.icon_pending.discard(key)
-        image = None
+        pixmap = None
         if picture is not None:
-            image = ctk.CTkImage(light_image=picture, dark_image=mica_image(picture), size=(ICON_SIZE, ICON_SIZE))
-        self.icon_cache[key] = image
+            image = picture.convert("RGBA")
+            data = image.tobytes("raw", "RGBA")
+            qimage = QImage(data, image.width, image.height, image.width * 4, QImage.Format.Format_RGBA8888).copy()
+            pixmap = QPixmap.fromImage(qimage)
+            pixmap.setDevicePixelRatio(image.width / ICON_SIZE)
+        self.icon_cache[key] = pixmap
         for callback in self.icon_waiters.pop(key, []):
-            if image is not None:
-                callback(image)
+            if pixmap is not None:
+                try:
+                    callback(pixmap)
+                except RuntimeError:
+                    pass   # the widget was rebuilt meanwhile
 
-    # ---------------------------------------------------------------- Mica
-    def apply_backdrop(self, window=None):
-        """Mica behind `window` (default: this one) in the dark theme, opaque otherwise.
+    # ---------------------------------------------------------------- theme and Mica
+    def is_dark(self):
+        theme = self.settings["theme"]
+        if theme in ("dark", "light"):
+            return theme == "dark"
+        hints = QGuiApplication.styleHints()
+        scheme = getattr(hints, "colorScheme", lambda: None)()
+        return scheme == Qt.ColorScheme.Dark
 
-        Under Mica every dark colour was converted for the backdrop (gui_theme.apply_palette): if
-        Windows refuses the backdrop, the palette goes back to plain colours and the window is
-        rebuilt, so it never shows those converted colours alone.
-        """
-        if not self.mica:
-            return
-        dark = ctk.get_appearance_mode() == "Dark"
-        targets = [window] if window is not None else [self] + [w for w in self.winfo_children()
-                                                                 if isinstance(w, Dialog)]
-        if window is None:
-            self.appearance = ctk.get_appearance_mode()
-        for target in targets:
+    def _system_theme_changed(self, _scheme):
+        if self.settings["theme"] == "system" and not getattr(self, "_theme_busy", False):
+            self.apply_theme()
+
+    def apply_theme(self, native=True):
+        """Colours of the light or dark theme, Mica on or off, without rebuilding anything."""
+        global THEME
+        hints = QGuiApplication.styleHints()
+        if hasattr(hints, "setColorScheme"):   # Qt's own parts (title bar, menus) follow the setting too
+            wanted = {"dark": Qt.ColorScheme.Dark, "light": Qt.ColorScheme.Light}.get(self.settings["theme"],
+                                                                                     Qt.ColorScheme.Unknown)
+            self._theme_busy = True
             try:
-                ok = winapi.set_backdrop(int(target.wm_frame(), 16), dark)
+                hints.setColorScheme(wanted)
+            finally:
+                self._theme_busy = False
+        dark = self.is_dark()
+        self.mica = self.translucent and self.settings["mica"]
+        if native and self.translucent:
+            hwnd = int(self.winId())
+            try:
+                winapi.set_dark_title_bar(hwnd, dark)
+                if not winapi.set_backdrop(hwnd, self.mica) and self.mica:
+                    log.info("Mica refused by Windows: plain background")
+                    self.mica = False
             except Exception:
                 log.debug("backdrop failed", exc_info=True)
-                ok = False
-            if not ok and dark and target is self:
-                log.info("Mica refused by Windows: plain colours")
                 self.mica = False
-                self.mica_supported = False
-                self.after(10, self.build)
-                return
+        elif native:
+            try:
+                winapi.set_dark_title_bar(int(self.winId()), dark)
+            except Exception:
+                log.debug("title bar colour failed", exc_info=True)
+        THEME = Theme(dark=dark, mica=self.mica, accent=self.accent, **self.fonts)
+        self.qapp.setStyleSheet(THEME.style_sheet())
+        refresh_glyphs()
+        for widget in self.findChildren(QWidget):
+            if isinstance(widget, Painted):
+                widget.update()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not getattr(self, "_shown", False):
+            self._shown = True
+            self.apply_theme()   # the native window exists now: title bar colour and Mica
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        for dialog in self.findChildren(Dialog):
+            dialog.setGeometry(self.rect())
 
     # ---------------------------------------------------------------- layout
     def build(self):
         state = self.list_page.state() if self.list_page is not None else None
-        if self.nav_pane is not None:
-            self.nav_pane.destroy()
-            self.content.destroy()
-        apply_palette(self.mica)
-        self.icon_cache.clear()
-        self.glyphs.cache.clear()
-        self._logos.clear()
-        self.configure(fg_color=C["bg"])
+        old = self.centralWidget()
         t = self.t
-        self.nav_pane = ctk.CTkFrame(self, fg_color=C["bg"], corner_radius=0,
-                                     width=NAV_COMPACT_WIDTH if self.nav_compact else NAV_WIDTH)
-        self.nav_pane.grid(row=0, column=0, sticky="ns")
-        self.nav_pane.pack_propagate(False)
-        toggle = icon_button(self.nav_pane, self, "menu", self.toggle_nav, size=36)
-        toggle.pack(anchor="w", padx=(8, 0), pady=(4, 6))
-        self.nav = {
-            "apps": NavItem(self.nav_pane, self, "apps", "apps", t("nav_apps")),
-            "background": NavItem(self.nav_pane, self, "background", "memory", t("nav_background")),
-            "log": NavItem(self.nav_pane, self, "log", "log", t("nav_log")),
-            "settings": NavItem(self.nav_pane, self, "settings", "settings", t("nav_settings")),
-        }
-        for name in ("apps", "background", "log"):
-            self.nav[name].pack(fill="x", padx=(4, 8), pady=2)
-        self.nav["settings"].pack(side="bottom", fill="x", padx=(4, 8), pady=(2, 10))
-        for item in self.nav.values():
+        self.install_translator()
+        root = QWidget()
+        root.setObjectName("root")
+        layout = hbox()
+        root.setLayout(layout)
+        self.nav_pane = QWidget()
+        self.nav_pane.setObjectName("nav")
+        self.nav_pane.setFixedWidth(NAV_COMPACT_WIDTH if self.nav_compact else NAV_WIDTH)
+        nav = vbox((4, 4, 6, 8), 2)
+        self.nav_pane.setLayout(nav)
+        toggle = icon_button("menu", self.toggle_nav, tooltip=t("nav_toggle"))
+        toggle.setFixedSize(40, 36)
+        nav.addWidget(toggle)
+        nav.addSpacing(4)
+        self.nav = {name: NavItem(glyph, t(f"nav_{name}")) for name, glyph in
+                    (("apps", "apps"), ("background", "memory"), ("log", "log"), ("settings", "settings"))}
+        for name, item in self.nav.items():
+            item.clicked.connect(lambda _checked=False, n=name: self.show_page(n))
             item.set_compact(self.nav_compact)
-        self.content = ctk.CTkFrame(self, fg_color=C["bg"], corner_radius=0)
-        self.content.grid(row=0, column=1, sticky="nsew")
+        for name in ("apps", "background", "log"):
+            nav.addWidget(self.nav[name])
+        nav.addStretch(1)
+        nav.addWidget(self.nav["settings"])
+        layout.addWidget(self.nav_pane)
+        layer = QFrame()
+        layer.setObjectName("layer")
+        layer_layout = vbox((1, 1, 0, 0))
+        layer.setLayout(layer_layout)
+        self.stack = QStackedWidget()
+        layer_layout.addWidget(self.stack)
+        layout.addWidget(layer, 1)
         self.list_page = ListPage(self, state)
         self.pages = {"apps": self.list_page, "closing": ClosingPage(self), "background": BackgroundPage(self),
                       "log": LogPage(self), "settings": SettingsPage(self)}
+        for page in self.pages.values():
+            self.stack.addWidget(page)
+        self.setCentralWidget(root)
+        if old is not None:
+            old.deleteLater()
         self.list_page.refresh()
-        self.show(self.current if self.current != "closing" else "apps")
-        self.appearance = None   # set the backdrop again for the new colours
+        self.show_page(self.current if self.current != "closing" else "apps")
+
+    def install_translator(self):
+        """Qt's own texts (the Copy / Paste menu of text fields) in the interface's language."""
+        if getattr(self, "translator", None) is not None:
+            self.qapp.removeTranslator(self.translator)
+        self.translator = QTranslator(self)
+        folder = QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)
+        if self.translator.load(f"qtbase_{self.language}", folder):
+            self.qapp.installTranslator(self.translator)
 
     def toggle_nav(self):
         self.nav_compact = not self.nav_compact
-        self.nav_pane.configure(width=NAV_COMPACT_WIDTH if self.nav_compact else NAV_WIDTH)
+        self.nav_pane.setFixedWidth(NAV_COMPACT_WIDTH if self.nav_compact else NAV_WIDTH)
         for item in self.nav.values():
             item.set_compact(self.nav_compact)
 
-    def show(self, name):
+    def show_page(self, name):
         if self.busy and name != "closing":
             return
         self.current = name
@@ -1920,17 +2176,20 @@ class App(ctk.CTk):
             self.pages["log"].load()
         elif name == "background":
             self.pages["background"].load()
-        self.pages[name].tkraise()
-        for key, item in self.nav.items():
-            item.set_active(key == name or (name == "closing" and key == "apps"))
+        self.stack.setCurrentWidget(self.pages[name])
+        active = "apps" if name == "closing" else name
+        self.nav[active].setChecked(True)
 
     def set_busy(self, busy):
         self.busy = busy
-        self.configure(cursor="watch" if busy else "")
+        if busy:
+            self.qapp.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        else:
+            self.qapp.restoreOverrideCursor()
 
     # ---------------------------------------------------------------- actions
     def start_closing(self, targets, timeout):
-        self.show("closing")
+        self.show_page("closing")
         self.pages["closing"].start(targets, timeout)
 
     def update_settings(self, **changes):
@@ -1942,19 +2201,11 @@ class App(ctk.CTk):
             return
         old, self.settings = self.settings, new
         core.log_titles = new["log_window_titles"]
-        if new["theme"] != old["theme"]:
-            ctk.set_appearance_mode(new["theme"])
-        mica = new["mica"] and self.mica_supported
-        if new["language"] != old["language"] or mica != self.mica:
-            if mica != self.mica:
-                self.mica = mica
-                if not mica:   # back to an opaque window before the plain colours arrive
-                    try:
-                        winapi.set_backdrop(int(self.wm_frame(), 16), False)
-                    except Exception:
-                        log.debug("backdrop reset failed", exc_info=True)
-            # Rebuilt after the current callback returns: the settings page is replaced too.
-            self.after(10, self.build)
+        if new["theme"] != old["theme"] or new["mica"] != old["mica"]:
+            self.apply_theme()
+        if new["language"] != old["language"]:
+            # Rebuilt once the current event is handled: the settings page is replaced too.
+            self.later(0, self.build)
             return
         if new["group_by_app"] != old["group_by_app"] or new["show_icons"] != old["show_icons"]:
             self.list_page.refresh(rebuild=True)
@@ -1973,12 +2224,12 @@ class App(ctk.CTk):
 
     def _relaunch_as_admin(self):
         if winapi.relaunch_as_admin():
-            self.destroy()
+            self.close()
         else:
             Dialog(self, self.t("error"), self.t("admin_failed"))
 
 
 def main():
     app = App()
-    app.mainloop()
-    return 0
+    app.show()
+    return app.qapp.exec()

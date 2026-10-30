@@ -29,7 +29,7 @@ CloseAllPython lists the windows you see in Alt+Tab and closes the applications 
 
 ### Features
 
-- **Windows 11 look.** Fluent (WinUI 3) interface: navigation pane, cards, Windows 11 controls and icons, light and dark themes. On Windows 11 22H2 and later the dark theme shows the Mica effect, the window tinted by your wallpaper (*Settings › Display › Transparency effect*).
+- **Windows 11 look.** Fluent (WinUI 3) interface: navigation pane, cards, Windows 11 controls and icons, light and dark themes. On Windows 11 22H2 and later both themes show the Mica effect, the window tinted by your wallpaper (*Settings › Display › Transparency effect*). Drawn with Qt (PySide6): smooth, without tearing, and the accent follows your Windows accent colour.
 - **Instant close.** Selected applications are force-stopped immediately (`TerminateProcess`); no waiting delay.
 - **Graceful mode (optional).** Applications are asked to close normally (`WM_CLOSE`) so they can show their save prompts; after a delay you choose what to do with the survivors.
 - **Windows stays usable.** Shell processes (Explorer, ApplicationFrameHost, TextInputHost…) are listed apart and can never be closed.
@@ -150,11 +150,11 @@ closeallpython.py      entry point
 closeall/
   winapi.py            every Win32 call
   core.py              window discovery and shutdown logic
-  gui.py               CustomTkinter interface (Fluent style)
-  gui_theme.py         colours, fonts, icons, Mica palette
+  gui.py               Qt (PySide6) interface, Fluent style
+  gui_theme.py         WinUI colours, fonts, icons, Qt style sheet
   cli.py               command line
   settings.py, i18n.py settings, log, translations
-  appicon.py, crash.py window icons, error reports
+  appicon.py, crash.py application icon, error reports
 tests/                 unit tests (winapi replaced by an in-memory fake: they run outside Windows too)
 tools/screenshots.py   README screenshots, taken on Windows
 ```
@@ -185,7 +185,7 @@ CloseAllPython liste les fenêtres visibles dans Alt+Tab et ferme les applicatio
 
 ### Fonctionnalités
 
-- **Look Windows 11.** Interface Fluent (WinUI 3) : volet de navigation, cartes, contrôles et icônes de Windows 11, thèmes clair et sombre. Sous Windows 11 22H2 et plus récent, le thème sombre affiche l'effet Mica, la fenêtre teintée par votre fond d'écran (*Paramètres › Affichage › Effet de transparence*).
+- **Look Windows 11.** Interface Fluent (WinUI 3) : volet de navigation, cartes, contrôles et icônes de Windows 11, thèmes clair et sombre. Sous Windows 11 22H2 et plus récent, les deux thèmes affichent l'effet Mica, la fenêtre teintée par votre fond d'écran (*Paramètres › Affichage › Effet de transparence*). Dessinée avec Qt (PySide6) : fluide, sans déchirement, et la couleur d'accentuation suit celle de Windows.
 - **Fermeture immédiate.** Les applications sélectionnées sont arrêtées de force tout de suite (`TerminateProcess`), sans délai d'attente.
 - **Mode normal (facultatif).** Les applications reçoivent une demande de fermeture normale (`WM_CLOSE`) et peuvent afficher leur demande d'enregistrement ; après un délai, vous décidez du sort des survivantes.
 - **Windows reste utilisable.** Les processus du shell (Explorer, ApplicationFrameHost, TextInputHost…) sont listés à part et ne peuvent jamais être fermés.
@@ -298,8 +298,8 @@ closeallpython.py      point d'entrée
 closeall/
   winapi.py            tous les appels Win32
   core.py              découverte des fenêtres et logique de fermeture
-  gui.py               interface CustomTkinter (style Fluent)
-  gui_theme.py         couleurs, polices, icônes, palette Mica
+  gui.py               interface Qt (PySide6), style Fluent
+  gui_theme.py         couleurs WinUI, polices, icônes, feuille de style Qt
   cli.py               ligne de commande
   settings.py, i18n.py paramètres, journal, traductions
   appicon.py, crash.py icônes de fenêtre, rapports d'erreur

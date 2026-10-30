@@ -37,8 +37,6 @@ INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
 
 # Window messages and styles
 WM_CLOSE = 0x0010
-WM_SETICON = 0x0080
-ICON_SMALL, ICON_BIG = 0, 1
 GWL_EXSTYLE = -20
 WS_EX_TOOLWINDOW, WS_EX_APPWINDOW = 0x00000080, 0x00040000
 GW_OWNER = 4
@@ -582,47 +580,6 @@ def exe_icon_image(path, size):
                 pass
 
 
-def window_dpi(hwnd):
-    """DPI of the monitor a window is on (96 = 100 %); 96 when Windows cannot tell."""
-    try:
-        return user32.GetDpiForWindow(wintypes.HWND(hwnd)) or 96
-    except AttributeError:  # Windows older than 10 1607
-        return 96
-
-
-def icon_from_image(image):
-    """HICON built from an RGBA Pillow image (the caller destroys it with destroy_icon)."""
-    width, height = image.size
-    pixels = image.convert("RGBA").tobytes("raw", "BGRA")
-    info = _bitmap_info(width, height)
-    bits = ctypes.c_void_p()
-    screen = user32.GetDC(None)
-    color = gdi32.CreateDIBSection(screen, ctypes.byref(info), 0, ctypes.byref(bits), None, 0)
-    user32.ReleaseDC(None, screen)
-    if not color or not bits.value:
-        return None
-    ctypes.memmove(bits, pixels, len(pixels))
-    mask = gdi32.CreateBitmap(width, height, 1, 1, None)  # unused: the alpha channel decides
-    try:
-        return user32.CreateIconIndirect(ctypes.byref(ICONINFO(True, 0, 0, mask, color))) or None
-    finally:
-        gdi32.DeleteObject(color)
-        gdi32.DeleteObject(mask)
-
-
-def destroy_icon(hicon):
-    if hicon:
-        user32.DestroyIcon(hicon)
-
-
-def set_window_icons(hwnd, big, small):
-    """Give a window its large (taskbar, Alt+Tab) and small (title bar) icons. Returns the
-    icons it had before, so the caller can destroy the ones it created earlier."""
-    old_big = user32.SendMessageW(hwnd, WM_SETICON, ICON_BIG, big or 0)
-    old_small = user32.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, small or 0)
-    return old_big, old_small
-
-
 # --------------------------------------------------------------------------- Mica backdrop
 
 DWMWA_SYSTEMBACKDROP_TYPE = 38    # Windows 11 22H2 (build 22621) and later
@@ -658,3 +615,28 @@ def set_backdrop(hwnd, mica):
     margins = MARGINS(-1, -1, -1, -1) if mica else MARGINS(0, 0, 0, 0)
     extended = dwmapi.DwmExtendFrameIntoClientArea(wintypes.HWND(hwnd), ctypes.byref(margins))
     return result == 0 and extended == 0
+
+
+DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+
+
+def set_dark_title_bar(hwnd, dark):
+    """Dark or light title bar (and Mica tint) for a window, as the theme of the application."""
+    if dwmapi is None:
+        return False
+    value = ctypes.c_int(1 if dark else 0)
+    return dwmapi.DwmSetWindowAttribute(wintypes.HWND(hwnd), DWMWA_USE_IMMERSIVE_DARK_MODE, ctypes.byref(value),
+                                        ctypes.sizeof(value)) == 0
+
+
+def accent_palette():
+    """The 32-byte AccentPalette of the user's Windows accent colour, or None."""
+    import winreg
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"Software\Microsoft\Windows\CurrentVersion\Explorer\Accent") as key:
+            value, kind = winreg.QueryValueEx(key, "AccentPalette")
+    except OSError:
+        return None
+    return bytes(value) if kind == winreg.REG_BINARY else None

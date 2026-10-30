@@ -109,6 +109,8 @@ class FakeSystem:
         mod.is_admin = lambda: system.admin
         mod.backdrop_supported = lambda: system.mica
         mod.set_backdrop = lambda hwnd, mica: system.calls.append(("set_backdrop", mica)) or system.mica
+        mod.set_dark_title_bar = lambda hwnd, dark: system.calls.append(("dark_title_bar", dark)) or True
+        mod.accent_palette = lambda: None
         mod.protected_folders = lambda: list(system.protected)
         mod.elevation_targets = lambda: list(system.elevation)
         mod.relaunch_as_admin = lambda: system.calls.append(("relaunch_as_admin",)) or True

@@ -3,7 +3,7 @@
 import sys
 
 sys.path.insert(0, SPECPATH)
-from build_support import version_resource  # noqa: E402
+from build_support import EXCLUDES, trim_qt, version_resource  # noqa: E402
 
 a = Analysis(
     ['closeallpython.py'],
@@ -14,10 +14,12 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['build_support'],
+    excludes=EXCLUDES,
     noarchive=False,
     optimize=0,
 )
+a.binaries = trim_qt(a.binaries)
+a.datas = trim_qt(a.datas)
 pyz = PYZ(a.pure)
 
 exe = EXE(

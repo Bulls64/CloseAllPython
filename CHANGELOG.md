@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.1.0 (2026-10-30)
+
+Interface redrawn with Qt (PySide6): smooth, and as in the mock-up
+- The interface is now drawn by Qt instead of Tk. Tk redrew the window piece by piece, which caused tearing and slow scrolling, worse with Mica on; Qt draws the whole window at once, with real transparency.
+- Mica in both themes, light and dark, on Windows 11 22H2 and later. The colours are WinUI's own, translucent over Mica as in Windows 11 apps; without Mica (turned off, or Windows 10) the window is opaque.
+- Faithful to the WinUI mock-up: cards, check boxes, animated toggle switches with their On / Off text, drop-down lists, the selector bar, the navigation view, the command bar, InfoBar and ContentDialog drawn over the window with a dimmed background.
+- The accent colour follows your Windows accent colour; the theme can follow Windows and changes live.
+- Sharp text and icons at every display scaling (Qt handles high DPI).
+- Executables: Tk and CustomTkinter are gone; only the Qt parts in use are bundled (QtCore, QtGui, QtWidgets, English and French translations).
+- Tests: the interface test drives the real Qt window (offscreen outside Windows); the self-test of the executables starts Qt and draws an icon with the Windows icon font.
+
 ## 2.0.0 (2026-10-30)
 
 New look in the Windows 11 Fluent (WinUI 3) style
@@ -165,6 +176,17 @@ Project
 ---
 
 # Journal des modifications (version française)
+
+## 2.1.0 (2026-10-30)
+
+Interface redessinée avec Qt (PySide6) : fluide, et fidèle à la maquette
+- L'interface est maintenant dessinée par Qt au lieu de Tk. Tk redessinait la fenêtre morceau par morceau, d'où le déchirement (tearing) et les lenteurs au défilement, pires avec Mica ; Qt dessine toute la fenêtre d'un coup, avec une vraie transparence.
+- Mica dans les deux thèmes, clair et sombre, sous Windows 11 22H2 et plus récent. Les couleurs sont celles de WinUI, translucides sur Mica comme dans les applications Windows 11 ; sans Mica (désactivé, ou Windows 10), la fenêtre est opaque.
+- Fidèle à la maquette WinUI : cartes, cases à cocher, interrupteurs animés avec leur texte Activé / Désactivé, listes déroulantes, barre de sélection, volet de navigation, barre de commandes, InfoBar et ContentDialog affichée par-dessus la fenêtre assombrie.
+- La couleur d'accentuation suit celle de Windows ; le thème peut suivre Windows et change en direct.
+- Textes et icônes nets à toutes les mises à l'échelle (Qt gère le haute résolution).
+- Exécutables : Tk et CustomTkinter disparaissent ; seules les parties de Qt utilisées sont embarquées (QtCore, QtGui, QtWidgets, traductions anglaise et française).
+- Tests : le test d'interface pilote la vraie fenêtre Qt (hors écran en dehors de Windows) ; l'autotest des exécutables démarre Qt et dessine une icône avec la police d'icônes de Windows.
 
 ## 2.0.0 (2026-10-30)
 

@@ -1,63 +1,66 @@
+import os
+import tempfile
 import unittest
 
-try:   # the interface needs Tk and CustomTkinter (always there on Windows)
-    from closeall import gui_theme
-except ImportError:
-    gui_theme = None
+from closeall import gui_theme   # plain Python: no Qt needed
 
 
-@unittest.skipIf(gui_theme is None, "needs tkinter and customtkinter")
-class PaletteTests(unittest.TestCase):
-    def tearDown(self):
-        gui_theme.apply_palette(False)
+class TokenTests(unittest.TestCase):
+    def test_light_and_dark_define_the_same_colours(self):
+        self.assertEqual(set(gui_theme.LIGHT), set(gui_theme.DARK))
 
-    def test_mica_color_is_the_difference_from_the_base(self):
-        self.assertEqual(gui_theme.mica_color("#323232"), "#121212")
-        self.assertEqual(gui_theme.mica_color("#60cdff"), "#40addf")
-        self.assertEqual(gui_theme.mica_color("#202020"), "#000000")   # the window background
-        self.assertEqual(gui_theme.mica_color("#000000"), "#000000")   # nothing below black
+    def test_every_colour_parses(self):
+        for palette in (gui_theme.LIGHT, gui_theme.DARK):
+            for name, value in palette.items():
+                r, g, b, a = gui_theme.parse_rgba(value)
+                self.assertTrue(all(0 <= part <= 255 for part in (r, g, b, a)), name)
 
-    def test_palette_without_mica_is_the_tokens(self):
-        palette = gui_theme.apply_palette(False)
-        self.assertEqual(palette["card"], gui_theme.TOKENS["card"])
-        self.assertFalse(gui_theme.mica_active())
+    def test_parse_rgba(self):
+        self.assertEqual(gui_theme.parse_rgba("#202020"), (32, 32, 32, 255))
+        self.assertEqual(gui_theme.parse_rgba("rgba(255, 255, 255, 0.051)"), (255, 255, 255, 13))
 
-    def test_palette_with_mica_converts_dark_colours_only(self):
-        palette = gui_theme.apply_palette(True)
-        self.assertTrue(gui_theme.mica_active())
-        light, dark = gui_theme.TOKENS["card"]
-        self.assertEqual(palette["card"], (light, gui_theme.mica_color(dark)))
-        self.assertEqual(palette["bg"][1], "#000000")
-        for name in gui_theme.OPAQUE:   # pop-up menus are separate windows: never converted
-            self.assertEqual(palette[name], gui_theme.TOKENS[name])
-        self.assertEqual(gui_theme.tile_color("Notepad")[1], gui_theme.mica_color(gui_theme.tile_color("Notepad")[0]))
+    def test_window_is_transparent_only_with_mica(self):
+        self.assertEqual(gui_theme.Theme(dark=True, mica=True)["window"], "transparent")
+        self.assertEqual(gui_theme.Theme(dark=True, mica=False)["window"], "#202020")
+        self.assertEqual(gui_theme.Theme(dark=False, mica=False)["window"], "#f3f3f3")
 
-    def test_icons_lose_the_base_under_mica(self):
-        from PIL import Image
+    def test_accent_follows_the_theme(self):
+        theme = gui_theme.Theme(dark=False, mica=False, accent=("#003e92", "#99ebff"))
+        self.assertEqual(theme["accent"], "#003e92")
+        self.assertEqual(gui_theme.Theme(dark=True, mica=False, accent=("#003e92", "#99ebff"))["accent"], "#99ebff")
+        self.assertEqual(theme["accent_hover"], "rgba(0, 62, 146, 0.9)")
 
-        picture = Image.new("RGBA", (2, 2), (100, 20, 255, 128))
-        self.assertIs(gui_theme.mica_image(picture), picture)   # no Mica: unchanged
-        gui_theme.apply_palette(True)
-        self.assertEqual(gui_theme.mica_image(picture).getpixel((0, 0)), (68, 0, 223, 128))
+    def test_accent_from_the_windows_palette(self):
+        self.assertEqual(gui_theme.accent_shades(None), gui_theme.DEFAULT_ACCENT)
+        self.assertEqual(gui_theme.accent_shades(b"\x00" * 8), gui_theme.DEFAULT_ACCENT)
+        palette = bytes(sum(([i * 10, i * 10 + 1, i * 10 + 2, 0] for i in range(8)), []))
+        self.assertEqual(gui_theme.accent_shades(palette), ("#28292a", "#0a0b0c"))   # Dark1, Light2
 
-    def test_every_token_is_a_colour_pair(self):
-        for name, pair in gui_theme.TOKENS.items():
-            self.assertEqual(len(pair), 2, name)
-            for value in pair:
-                self.assertRegex(value, r"^#[0-9a-f]{6}$", name)
+    def test_style_sheet_has_no_missing_token(self):
+        for dark in (False, True):
+            sheet = gui_theme.Theme(dark=dark, mica=True, icon_font="Segoe Fluent Icons").style_sheet()
+            self.assertEqual(sheet.count("{"), sheet.count("}"))
+            self.assertNotRegex(sheet, r"\{\w+\}")   # an unformatted placeholder
+            self.assertIn("Segoe Fluent Icons", sheet)
 
 
-@unittest.skipIf(gui_theme is None, "needs tkinter and customtkinter")
 class GlyphTests(unittest.TestCase):
     def test_every_glyph_has_a_windows_and_a_fallback_character(self):
         for name, (windows_char, fallback) in gui_theme.GLYPHS.items():
             self.assertTrue(0xE000 <= ord(windows_char) <= 0xF8FF, name)   # icon font private area
             self.assertEqual(len(fallback), 1, name)
 
-    def test_icon_font_path(self):
-        import os
-        import tempfile
+    def test_fallback_without_the_icon_font(self):
+        self.assertEqual(gui_theme.Theme(dark=True, mica=False).glyph("back"), "←")
+        self.assertEqual(gui_theme.Theme(dark=True, mica=False, icon_font="Segoe MDL2 Assets").glyph("back"), "")
 
+    def test_tiles(self):
+        self.assertRegex(gui_theme.tile_color("Notepad"), r"^#[0-9a-f]{6}$")
+        self.assertEqual(gui_theme.tile_color("Notepad"), gui_theme.tile_color("notepad"))
+        self.assertEqual(gui_theme.tile_letter("7-Zip"), "7")
+        self.assertEqual(gui_theme.tile_letter("—"), "?")
+
+    def test_icon_font_path(self):
         with tempfile.TemporaryDirectory() as windows:
             self.assertIsNone(gui_theme.icon_font_path(windows) if not os.environ.get("WINDIR") else None)
             os.makedirs(os.path.join(windows, "Fonts"))

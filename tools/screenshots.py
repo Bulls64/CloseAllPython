@@ -1,6 +1,6 @@
 """Screenshots of the interface for the README, taken on Windows.
 
-The application runs for real (Windows fonts, Fluent icons, title bar, Mica) on a made-up list of
+The application runs for real (Qt, Windows fonts, Fluent icons, title bar, Mica) on a made-up list of
 applications and processes, the same on every run. GitHub Actions runs it (workflow
 "Screenshots"); it also works on any Windows PC:
 
@@ -96,10 +96,8 @@ def child(name, language, theme, scene, out_dir):
                            memory=size * MB)
     fakewin.install(system)
     module = sys.modules["closeall.winapi"]
-    for attr in ("set_backdrop", "windows_directory", "window_dpi", "icon_from_image", "set_window_icons",
-                 "destroy_icon"):
+    for attr in ("backdrop_supported", "set_backdrop", "set_dark_title_bar", "accent_palette", "windows_directory"):
         setattr(module, attr, getattr(real, attr))
-    module.backdrop_supported = real.backdrop_supported
     module.is_admin = lambda: False
     module.exe_icon_image = lambda path, size: None
 
@@ -128,14 +126,16 @@ def child(name, language, theme, scene, out_dir):
     settings.log_path = lambda: Shown(real_dir / "closeallpython.log")
 
     app = gui.App()
-    screen_w, screen_h = app.winfo_screenwidth(), app.winfo_screenheight()
-    width, height = min(1180, screen_w - 60), min(740, screen_h - 90)
-    app.geometry(f"{width}x{height}+20+20")
+    area = app.screen().availableGeometry()
+    width, height = min(1180, area.width() - 60), min(740, area.height() - 90)
+    app.resize(width, height)
+    app.move(area.x() + 20, area.y() + 20)
+    app.show()
 
-    def pump(seconds):
+    def pump(seconds, until=None):
         end = time.monotonic() + seconds
-        while time.monotonic() < end:
-            app.update()
+        while time.monotonic() < end and not (until and until()):
+            app.qapp.processEvents()
             time.sleep(0.02)
 
     pump(1.5)
@@ -147,43 +147,34 @@ def child(name, language, theme, scene, out_dir):
     notepad = "Bloc-notes" if french else "Notepad"
     if scene in ("applications", "confirmation"):
         for app_name in (notepad, "Paint", "LibreOffice"):
-            card(app_name).check.toggle()
+            card(app_name).check.setChecked(True)
         card("Firefox").toggle_expand()
         if scene == "confirmation":
             page.close_selected()
     elif scene == "closing":
         for app_name in (notepad, "Paint", "LibreOffice", "VLC media player"):
-            card(app_name).check.toggle()
+            card(app_name).check.setChecked(True)
         page.close_selected()
         pump(0.5)
-        next(w for w in app.winfo_children() if isinstance(w, gui.Dialog))._confirm()
-        end = time.monotonic() + 10
-        while app.pages["closing"].running and time.monotonic() < end:
-            app.update()
-            time.sleep(0.02)
+        app.findChildren(gui.Dialog)[0]._confirm()
+        pump(0.3)
+        pump(10, until=lambda: not app.pages["closing"].running)
     elif scene == "background":
-        app.show("background")
-        end = time.monotonic() + 10
-        while app.pages["background"].report is None and time.monotonic() < end:
-            app.update()
-            time.sleep(0.02)
+        app.show_page("background")
+        pump(10, until=lambda: app.pages["background"].report is not None)
     elif scene == "settings":
-        app.show("settings")
-    app.attributes("-topmost", True)
-    app.lift()
-    app.focus_force()
-    hwnd = int(app.wm_frame(), 16)
-    ctypes.windll.user32.SetForegroundWindow(hwnd)
-    pump(0.5)
-    for dialog in (w for w in app.winfo_children() if isinstance(w, gui.Dialog)):
-        dialog.attributes("-topmost", True)   # above the main window, which is topmost too
-        dialog.lift()
-        dialog.focus_force()
-    pump(2.5)
+        app.show_page("settings")
+    hwnd = int(app.winId())
+    user32 = ctypes.windll.user32
+    # Above every other window, without recreating it (Qt would lose the Mica attributes).
+    user32.SetWindowPos(wintypes.HWND(hwnd), wintypes.HWND(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0040)
+    user32.SetForegroundWindow(wintypes.HWND(hwnd))
+    app.activateWindow()
+    pump(3)
     box = frame_bounds(hwnd)
     ImageGrab.grab(all_screens=True).crop(box).save(os.path.join(out_dir, f"{name}.png"))
-    print(json.dumps({"name": name, "mica": app.mica, "window": box, "screen": [screen_w, screen_h]}))
-    app.destroy()
+    print(json.dumps({"name": name, "mica": app.mica, "window": box, "screen": [area.width(), area.height()]}))
+    app.close()
 
 
 def main(out_dir):
