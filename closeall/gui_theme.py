@@ -94,6 +94,29 @@ DARK = {
     "scroll": "rgba(255, 255, 255, 0.545)",
 }
 
+# More transparent surfaces, used when the Mica backdrop shows through (the wallpaper tint is
+# then clearly visible behind the content area, the cards and the controls).
+MICA_LIGHT = {
+    "layer": "rgba(255, 255, 255, 0.22)",
+    "card": "rgba(255, 255, 255, 0.4)",
+    "card_hover": "rgba(255, 255, 255, 0.55)",
+    "card_secondary": "rgba(255, 255, 255, 0.25)",
+    "control": "rgba(255, 255, 255, 0.45)",
+    "control_hover": "rgba(255, 255, 255, 0.6)",
+    "input": "rgba(255, 255, 255, 0.45)",
+    "input_focus": "rgba(255, 255, 255, 0.85)",
+}
+MICA_DARK = {
+    "layer": "rgba(58, 58, 58, 0.1)",
+    "card": "rgba(255, 255, 255, 0.035)",
+    "card_hover": "rgba(255, 255, 255, 0.07)",
+    "card_secondary": "rgba(255, 255, 255, 0.02)",
+    "control": "rgba(255, 255, 255, 0.05)",
+    "control_hover": "rgba(255, 255, 255, 0.08)",
+    "input": "rgba(255, 255, 255, 0.05)",
+    "input_focus": "rgba(30, 30, 30, 0.5)",
+}
+
 # Letter tiles of applications without an icon.
 TILE_COLORS = ("#2f6fae", "#b8552c", "#2f7f87", "#a34474", "#5f53b8", "#4a5263", "#4d58b0", "#3f7d3a", "#8a5a1f")
 
@@ -203,6 +226,8 @@ class Theme:
     @property
     def tokens(self):
         values = dict(DARK if self.dark else LIGHT)
+        if self.mica:
+            values.update(MICA_DARK if self.dark else MICA_LIGHT)
         accent = self.accent[1 if self.dark else 0]
         r, g, b, _a = parse_rgba(accent)
         values["accent"] = accent
