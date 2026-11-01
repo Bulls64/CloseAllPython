@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.1.1 (2026-11-01)
+
+- More transparency with Mica: the content area, cards, buttons and fields are more translucent, so the wallpaper tint shows through the whole window. Without Mica, the colours are unchanged.
+
 ## 2.1.0 (2026-10-30)
 
 Interface redrawn with Qt (PySide6): smooth, and as in the mock-up
@@ -176,6 +180,10 @@ Project
 ---
 
 # Journal des modifications (version française)
+
+## 2.1.1 (2026-11-01)
+
+- Plus de transparence avec Mica : la zone de contenu, les cartes, les boutons et les champs sont plus translucides, la teinte du fond d'écran se voit dans toute la fenêtre. Sans Mica, les couleurs sont inchangées.
 
 ## 2.1.0 (2026-10-30)
 
