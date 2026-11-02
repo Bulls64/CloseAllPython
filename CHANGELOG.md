@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.2.0 (2026-11-02)
+
+Much more transparency
+- New backdrop, Acrylic, now the default: what lies behind the window (other windows, the desktop) shows through, blurred, as in the Windows 11 Start menu. *Settings › Display › Transparency effect* chooses Acrylic, Mica Alt, Mica or Off.
+- The content area, cards, buttons and fields are far more translucent over the backdrop, in both themes; text, dialogs and menus stay opaque so they remain readable.
+- Settings of 2.0 and 2.1 with Mica turned off stay off.
+
 ## 2.1.1 (2026-11-01)
 
 - More transparency with Mica: the content area, cards, buttons and fields are more translucent, so the wallpaper tint shows through the whole window. Without Mica, the colours are unchanged.
@@ -180,6 +187,13 @@ Project
 ---
 
 # Journal des modifications (version française)
+
+## 2.2.0 (2026-11-02)
+
+Beaucoup plus de transparence
+- Nouvel effet, Acrylique, désormais par défaut : ce qu'il y a derrière la fenêtre (autres fenêtres, bureau) se voit à travers, flouté, comme dans le menu Démarrer de Windows 11. *Paramètres › Affichage › Effet de transparence* permet de choisir Acrylique, Mica Alt, Mica ou Désactivé.
+- La zone de contenu, les cartes, les boutons et les champs sont bien plus translucides sur l'effet, dans les deux thèmes ; les textes, les boîtes de dialogue et les menus restent opaques pour rester lisibles.
+- Si Mica était désactivé en 2.0 ou 2.1, la transparence reste désactivée.
 
 ## 2.1.1 (2026-11-01)
 
