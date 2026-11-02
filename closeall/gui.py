@@ -1556,10 +1556,13 @@ class SettingsPage(Page):
         theme.currentTextChanged.connect(self._on_theme)
         settings_card("color", t("theme"), t("theme_hint"), theme, body)
         supported = app.translucent
-        self.mica_toggle = toggle_with_state(app, s["mica"] and supported,
-                                             lambda value: app.update_settings(mica=value), enabled=supported)
+        self.backdrop_values = [(code, t(f"backdrop_{code}")) for code in settings_mod.BACKDROPS]
+        self.backdrop_box = ComboBox([name for _, name in self.backdrop_values])
+        self.backdrop_box.setCurrentText(dict(self.backdrop_values)[s["backdrop"] if supported else "none"])
+        self.backdrop_box.setEnabled(supported)
+        self.backdrop_box.currentTextChanged.connect(self._on_backdrop)
         settings_card("transparency", t("mica"), t("mica_hint") if supported else t("mica_unavailable"),
-                      self.mica_toggle, body)
+                      self.backdrop_box, body)
 
         # ---- closing
         section_header(t("section_closing"), body)
@@ -1707,6 +1710,10 @@ class SettingsPage(Page):
     def _on_language(self, value):
         code = next(code for code, name in self.language_values if name == value)
         self.app.update_settings(language=code)
+
+    def _on_backdrop(self, value):
+        code = next(code for code, name in self.backdrop_values if name == value)
+        self.app.update_settings(backdrop=code)
 
     def _on_theme(self, value):
         code = next(code for code, name in self.theme_values if name == value)
@@ -2104,12 +2111,13 @@ class App(QMainWindow):
             finally:
                 self._theme_busy = False
         dark = self.is_dark()
-        self.mica = self.translucent and self.settings["mica"]
+        backdrop = self.settings["backdrop"]
+        self.mica = self.translucent and backdrop != "none"
         if native and self.translucent:
             hwnd = int(self.winId())
             try:
                 winapi.set_dark_title_bar(hwnd, dark)
-                if not winapi.set_backdrop(hwnd, self.mica) and self.mica:
+                if not winapi.set_backdrop(hwnd, backdrop if self.mica else "none") and self.mica:
                     log.info("Mica refused by Windows: plain background")
                     self.mica = False
             except Exception:
@@ -2120,7 +2128,7 @@ class App(QMainWindow):
                 winapi.set_dark_title_bar(int(self.winId()), dark)
             except Exception:
                 log.debug("title bar colour failed", exc_info=True)
-        THEME = Theme(dark=dark, mica=self.mica, accent=self.accent, **self.fonts)
+        THEME = Theme(dark=dark, mica=self.mica, backdrop=backdrop, accent=self.accent, **self.fonts)
         self.qapp.setStyleSheet(THEME.style_sheet())
         refresh_glyphs()
         for widget in self.findChildren(QWidget):
@@ -2242,7 +2250,7 @@ class App(QMainWindow):
             return
         old, self.settings = self.settings, new
         core.log_titles = new["log_window_titles"]
-        if new["theme"] != old["theme"] or new["mica"] != old["mica"]:
+        if new["theme"] != old["theme"] or new["backdrop"] != old["backdrop"]:
             self.apply_theme()
         if new["language"] != old["language"]:
             # Rebuilt once the current event is handled: the settings page is replaced too.

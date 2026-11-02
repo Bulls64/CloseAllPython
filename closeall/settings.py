@@ -19,9 +19,11 @@ DEFAULT_SETTINGS = {
     "auto_update": False,
     "background_include_system": False,
     "log_window_titles": False,
-    "mica": True,
+    "backdrop": "acrylic",
 }
 THEMES = ("system", "light", "dark")
+# Window backdrops of Windows 11 22H2+, most transparent first.
+BACKDROPS = ("acrylic", "mica_alt", "mica", "none")
 BOOL_KEYS = tuple(key for key, value in DEFAULT_SETTINGS.items() if isinstance(value, bool))
 TIMEOUT_MIN, TIMEOUT_MAX = 1, 60
 
@@ -57,6 +59,11 @@ def parse_settings(raw):
         # Only real JSON booleans are accepted: bool("false") would be True.
         if isinstance(raw.get(key), bool):
             values[key] = raw[key]
+    if raw.get("backdrop") in BACKDROPS:
+        values["backdrop"] = raw["backdrop"]
+    elif raw.get("mica") is False:
+        # Settings written by versions 2.0 and 2.1 (Mica on or off).
+        values["backdrop"] = "none"
     timeout = raw.get("close_timeout")
     if isinstance(timeout, int) and not isinstance(timeout, bool) and TIMEOUT_MIN <= timeout <= TIMEOUT_MAX:
         values["close_timeout"] = timeout

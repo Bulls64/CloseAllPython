@@ -28,7 +28,7 @@ jobs:
         shell: pwsh
         run: Set-DisplayResolution -Width 1600 -Height 1000 -Force
       - name: Take the screenshots
-        run: python tools/screenshots.py screenshots
+        run: python tools/screenshots.py screenshots --wallpaper
       - name: Publish the pictures
         if: always()
         shell: bash

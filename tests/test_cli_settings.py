@@ -185,6 +185,16 @@ class RunCliTests(unittest.TestCase):
         self.assertIn("No matching window", out)
 
 
+class BackdropSettingTests(unittest.TestCase):
+    def test_backdrop_default_and_migration(self):
+        from closeall import settings
+        self.assertEqual(settings.parse_settings({})["backdrop"], "acrylic")
+        self.assertEqual(settings.parse_settings({"mica": False})["backdrop"], "none")   # 2.0 / 2.1 settings
+        self.assertEqual(settings.parse_settings({"mica": True})["backdrop"], "acrylic")
+        self.assertEqual(settings.parse_settings({"backdrop": "mica_alt"})["backdrop"], "mica_alt")
+        self.assertEqual(settings.parse_settings({"backdrop": "glass"})["backdrop"], "acrylic")
+
+
 if __name__ == "__main__":
     unittest.main()
 
@@ -241,3 +251,4 @@ class CrashReportTests(unittest.TestCase):
         self.assertEqual(len(shown), 1)
         self.assertIn("RuntimeError: no display", shown[0])
         self.assertIn("crash.txt", shown[0])
+

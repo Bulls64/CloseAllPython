@@ -94,28 +94,36 @@ DARK = {
     "scroll": "rgba(255, 255, 255, 0.545)",
 }
 
-# More transparent surfaces, used when the Mica backdrop shows through (the wallpaper tint is
-# then clearly visible behind the content area, the cards and the controls).
-MICA_LIGHT = {
-    "layer": "rgba(255, 255, 255, 0.22)",
-    "card": "rgba(255, 255, 255, 0.4)",
-    "card_hover": "rgba(255, 255, 255, 0.55)",
-    "card_secondary": "rgba(255, 255, 255, 0.25)",
-    "control": "rgba(255, 255, 255, 0.45)",
-    "control_hover": "rgba(255, 255, 255, 0.6)",
-    "input": "rgba(255, 255, 255, 0.45)",
-    "input_focus": "rgba(255, 255, 255, 0.85)",
+# Surfaces over a backdrop: much more translucent than WinUI's defaults, so the backdrop shows
+# through the whole window. Acrylic (what lies behind the window, blurred) gets the lightest
+# content layer; Mica and Mica Alt (the wallpaper's tint) a little more.
+BACKDROP_LIGHT = {
+    "layer": "rgba(255, 255, 255, 0.08)",
+    "layer_stroke": "rgba(0, 0, 0, 0.05)",
+    "card": "rgba(255, 255, 255, 0.22)",
+    "card_hover": "rgba(255, 255, 255, 0.35)",
+    "card_secondary": "rgba(255, 255, 255, 0.12)",
+    "control": "rgba(255, 255, 255, 0.3)",
+    "control_hover": "rgba(255, 255, 255, 0.45)",
+    "control_pressed": "rgba(255, 255, 255, 0.2)",
+    "input": "rgba(255, 255, 255, 0.3)",
+    "input_focus": "rgba(255, 255, 255, 0.75)",
+    "neutral_bg": "rgba(0, 0, 0, 0.05)",
 }
-MICA_DARK = {
-    "layer": "rgba(58, 58, 58, 0.1)",
-    "card": "rgba(255, 255, 255, 0.035)",
-    "card_hover": "rgba(255, 255, 255, 0.07)",
+BACKDROP_DARK = {
+    "layer": "rgba(0, 0, 0, 0.0)",
+    "layer_stroke": "rgba(255, 255, 255, 0.05)",
+    "card": "rgba(255, 255, 255, 0.04)",
+    "card_hover": "rgba(255, 255, 255, 0.075)",
     "card_secondary": "rgba(255, 255, 255, 0.02)",
-    "control": "rgba(255, 255, 255, 0.05)",
-    "control_hover": "rgba(255, 255, 255, 0.08)",
-    "input": "rgba(255, 255, 255, 0.05)",
-    "input_focus": "rgba(30, 30, 30, 0.5)",
+    "control": "rgba(255, 255, 255, 0.055)",
+    "control_hover": "rgba(255, 255, 255, 0.085)",
+    "control_pressed": "rgba(255, 255, 255, 0.03)",
+    "input": "rgba(255, 255, 255, 0.055)",
+    "input_focus": "rgba(20, 20, 20, 0.45)",
 }
+# Mica only tints: a light veil on the content layer keeps it apart from the navigation pane.
+MICA_LAYER = {False: "rgba(255, 255, 255, 0.2)", True: "rgba(255, 255, 255, 0.025)"}
 
 # Letter tiles of applications without an icon.
 TILE_COLORS = ("#2f6fae", "#b8552c", "#2f7f87", "#a34474", "#5f53b8", "#4a5263", "#4d58b0", "#3f7d3a", "#8a5a1f")
@@ -216,7 +224,8 @@ def accent_shades(palette):
 @dataclass
 class Theme:
     dark: bool
-    mica: bool                     # the window shows the Mica backdrop (translucent background)
+    mica: bool                     # the window shows a backdrop (Mica or Acrylic): translucent background
+    backdrop: str = "mica"         # which one: "acrylic", "mica_alt" or "mica"
     accent: tuple = DEFAULT_ACCENT
     ui_font: str = "Segoe UI"
     display_font: str = "Segoe UI"
@@ -227,7 +236,9 @@ class Theme:
     def tokens(self):
         values = dict(DARK if self.dark else LIGHT)
         if self.mica:
-            values.update(MICA_DARK if self.dark else MICA_LIGHT)
+            values.update(BACKDROP_DARK if self.dark else BACKDROP_LIGHT)
+            if self.backdrop != "acrylic":
+                values["layer"] = MICA_LAYER[self.dark]
         accent = self.accent[1 if self.dark else 0]
         r, g, b, _a = parse_rgba(accent)
         values["accent"] = accent

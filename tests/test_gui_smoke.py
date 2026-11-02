@@ -159,26 +159,33 @@ class InterfaceSmokeTests(unittest.TestCase):
         self.assertIs(self.app.list_page, page)
         self.assertIn(("dark_title_bar", False), self.system.calls)
 
-    def test_mica_follows_the_setting_in_both_themes(self):
+    def test_backdrop_follows_the_setting_in_both_themes(self):
         self.system.mica = True
         self.app = self.open_app()
         self.assertTrue(self.app.mica)
         self.assertEqual(self.gui.THEME["window"], "transparent")
-        self.assertIn(("set_backdrop", True), self.system.calls)
+        self.assertIn(("set_backdrop", "acrylic"), self.system.calls)   # the default: the most transparent
+        self.assertEqual(self.gui.THEME["layer"], "rgba(0, 0, 0, 0.0)")
         self.system.calls.clear()
         self.app.update_settings(theme="light")
-        self.assertTrue(self.app.mica)   # Mica in the light theme too
-        self.assertIn(("set_backdrop", True), self.system.calls)
-        self.app.update_settings(mica=False)
+        self.assertTrue(self.app.mica)   # in the light theme too
+        self.assertIn(("set_backdrop", "acrylic"), self.system.calls)
+        self.app.update_settings(backdrop="mica")
+        self.assertIn(("set_backdrop", "mica"), self.system.calls)
+        self.assertTrue(self.app.mica)
+        self.app.update_settings(backdrop="none")
         self.assertFalse(self.app.mica)
-        self.assertIn(("set_backdrop", False), self.system.calls)
+        self.assertIn(("set_backdrop", "none"), self.system.calls)
         self.assertEqual(self.gui.THEME["window"], "#f3f3f3")   # opaque again
         self.app.show_page("settings")
-        self.assertIn("Effet de transparence (Mica)", self.texts(self.app.pages["settings"]))
+        settings = self.app.pages["settings"]
+        self.assertIn("Effet de transparence", self.texts(settings))
+        settings.backdrop_box.setCurrentText("Mica Alt")
+        self.assertEqual(self.app.settings["backdrop"], "mica_alt")
 
     def test_mica_refused_falls_back_to_an_opaque_window(self):
         self.system.mica = True
-        sys.modules["closeall.winapi"].set_backdrop = lambda hwnd, mica: False
+        sys.modules["closeall.winapi"].set_backdrop = lambda hwnd, kind: False
         self.app = self.open_app()
         self.assertFalse(self.app.mica)
         self.assertEqual(self.gui.THEME["window"], "#202020")
@@ -187,7 +194,7 @@ class InterfaceSmokeTests(unittest.TestCase):
         self.assertFalse(self.app.mica)
         self.assertFalse(self.app.translucent)
         self.assertEqual(self.gui.THEME["window"], "#202020")
-        self.assertNotIn(("set_backdrop", True), self.system.calls)
+        self.assertFalse([call for call in self.system.calls if call[0] == "set_backdrop"])
 
     def test_navigation_pane_folds_in_narrow_windows(self):
         self.app.resize(900, 700)

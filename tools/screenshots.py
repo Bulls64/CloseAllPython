@@ -4,7 +4,10 @@ The application runs for real (Qt, Windows fonts, Fluent icons, title bar, Mica)
 applications and processes, the same on every run. GitHub Actions runs it (workflow
 "Screenshots"); it also works on any Windows PC:
 
-    python tools/screenshots.py OUT_DIR
+    python tools/screenshots.py OUT_DIR [--wallpaper]
+
+--wallpaper first sets a bright wallpaper and turns Windows' transparency effects on, so the
+pictures show the backdrop (it changes the desktop: for a build machine).
 
 Each picture is taken in a fresh process. The names match the files in docs/screenshots.
 """
@@ -177,8 +180,35 @@ def child(name, language, theme, scene, out_dir):
     app.close()
 
 
-def main(out_dir):
+def colourful_desktop(out_dir):
+    """A bright wallpaper and Windows' transparency effects on, so the pictures show what the
+    backdrop lets through. Only for a build machine (option --wallpaper): it changes the desktop."""
+    import winreg
+
+    from PIL import Image, ImageDraw
+
+    width, height = 1600, 1000
+    picture = Image.new("RGB", (width, height))
+    draw = ImageDraw.Draw(picture)
+    for x in range(width):   # orange to violet
+        t = x / width
+        draw.line([(x, 0), (x, height)], fill=(int(255 - 120 * t), int(140 - 100 * t), int(40 + 200 * t)))
+    for i, colour in enumerate(((0, 200, 255), (60, 220, 120), (255, 230, 60))):
+        draw.ellipse([200 + i * 420, 150 + (i % 2) * 380, 560 + i * 420, 510 + (i % 2) * 380], fill=colour)
+    path = os.path.join(tempfile.gettempdir(), "closeall-wallpaper.png")
+    picture.save(path)
+    key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+    winreg.SetValueEx(key, "EnableTransparency", 0, winreg.REG_DWORD, 1)
+    winreg.CloseKey(key)
+    ctypes.windll.user32.SystemParametersInfoW(0x0014, 0, path, 0x01 | 0x02)   # SPI_SETDESKWALLPAPER
+    ctypes.windll.user32.SendMessageTimeoutW(0xFFFF, 0x001A, 0, "ImmersiveColorSet", 0x0002, 3000, None)
+    time.sleep(2)
+
+
+def main(out_dir, wallpaper=False):
     os.makedirs(out_dir, exist_ok=True)
+    if wallpaper:
+        colourful_desktop(out_dir)
     results = []
     for name, language, theme, scene in SHOTS:
         run = subprocess.run([sys.executable, os.path.abspath(__file__), "--child", name, language, theme, scene,
@@ -199,4 +229,4 @@ if __name__ == "__main__":
     if sys.argv[1] == "--child":
         child(*sys.argv[2:7])
     else:
-        sys.exit(main(sys.argv[1]))
+        sys.exit(main(sys.argv[1], wallpaper="--wallpaper" in sys.argv[2:]))

@@ -583,7 +583,8 @@ def exe_icon_image(path, size):
 # --------------------------------------------------------------------------- Mica backdrop
 
 DWMWA_SYSTEMBACKDROP_TYPE = 38    # Windows 11 22H2 (build 22621) and later
-DWMSBT_NONE, DWMSBT_MAINWINDOW = 1, 2
+DWMSBT_NONE, DWMSBT_MAINWINDOW, DWMSBT_TRANSIENTWINDOW, DWMSBT_TABBEDWINDOW = 1, 2, 3, 4
+BACKDROP_TYPES = {"mica": DWMSBT_MAINWINDOW, "acrylic": DWMSBT_TRANSIENTWINDOW, "mica_alt": DWMSBT_TABBEDWINDOW}
 MICA_MIN_BUILD = 22621
 
 
@@ -600,19 +601,23 @@ def backdrop_supported():
     return dwmapi is not None and windows_build() >= MICA_MIN_BUILD
 
 
-def set_backdrop(hwnd, mica):
-    """Show the Mica backdrop through the whole window (`mica`), or make it opaque again.
+def set_backdrop(hwnd, kind):
+    """Show a Windows 11 backdrop through the whole window, or make it opaque again.
 
-    With Mica, the frame is extended into the whole client area so the compositor draws the
-    backdrop behind it; the window's black pixels then show the backdrop alone. Returns True
-    when Windows accepted both changes.
+    `kind` is "acrylic" (blur of what lies behind the window), "mica_alt", "mica" (tint of the
+    wallpaper), or "none"/None. The frame is extended into the whole client area so the
+    compositor draws the backdrop behind it; the window's transparent pixels then show the
+    backdrop. Returns True when Windows accepted both changes.
     """
     if dwmapi is None:
         return False
-    value = ctypes.c_int(DWMSBT_MAINWINDOW if mica else DWMSBT_NONE)
+    if kind is True:
+        kind = "mica"
+    backdrop = BACKDROP_TYPES.get(kind)
+    value = ctypes.c_int(backdrop or DWMSBT_NONE)
     result = dwmapi.DwmSetWindowAttribute(wintypes.HWND(hwnd), DWMWA_SYSTEMBACKDROP_TYPE, ctypes.byref(value),
                                           ctypes.sizeof(value))
-    margins = MARGINS(-1, -1, -1, -1) if mica else MARGINS(0, 0, 0, 0)
+    margins = MARGINS(-1, -1, -1, -1) if backdrop else MARGINS(0, 0, 0, 0)
     extended = dwmapi.DwmExtendFrameIntoClientArea(wintypes.HWND(hwnd), ctypes.byref(margins))
     return result == 0 and extended == 0
 
