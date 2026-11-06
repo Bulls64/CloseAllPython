@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.0 (2026-11-06)
+
+- Transparency slider in *Settings › Display*: from 0 % (WinUI's own surfaces) to 100 % (nearly glass), 60 % by default (the look of 2.2 and 2.3). The window follows the slider as you move it, and the level is remembered. It is greyed out when the effect is off or unavailable.
+
 ## 2.3.0 (2026-11-06)
 
 - Dark / light mode button in the navigation pane, above Settings: one click switches the theme (it shows what a click gives: the sun in the dark theme, the moon in the light one). The choice is remembered and shown in *Settings › Display › Theme*.
@@ -191,6 +195,10 @@ Project
 ---
 
 # Journal des modifications (version française)
+
+## 2.4.0 (2026-11-06)
+
+- Curseur de transparence dans *Paramètres › Affichage* : de 0 % (surfaces WinUI d'origine) à 100 % (presque du verre), 60 % par défaut (l'aspect des versions 2.2 et 2.3). La fenêtre suit le curseur pendant qu'on le déplace, et le niveau est mémorisé. Il est grisé quand l'effet est désactivé ou indisponible.
 
 ## 2.3.0 (2026-11-06)
 

@@ -186,6 +186,14 @@ class RunCliTests(unittest.TestCase):
 
 
 class BackdropSettingTests(unittest.TestCase):
+    def test_transparency_level(self):
+        from closeall import settings
+        self.assertEqual(settings.parse_settings({})["transparency"], 60)
+        self.assertEqual(settings.parse_settings({"transparency": 0})["transparency"], 0)
+        self.assertEqual(settings.parse_settings({"transparency": 100})["transparency"], 100)
+        for bad in (101, -1, "50", 5.5, True, None):
+            self.assertEqual(settings.parse_settings({"transparency": bad})["transparency"], 60, bad)
+
     def test_backdrop_default_and_migration(self):
         from closeall import settings
         self.assertEqual(settings.parse_settings({})["backdrop"], "acrylic")

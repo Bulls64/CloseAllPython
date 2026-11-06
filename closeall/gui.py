@@ -1563,6 +1563,24 @@ class SettingsPage(Page):
         self.backdrop_box.currentTextChanged.connect(self._on_backdrop)
         settings_card("transparency", t("mica"), t("mica_hint") if supported else t("mica_unavailable"),
                       self.backdrop_box, body)
+        level = QWidget()
+        level_layout = hbox(spacing=12)
+        level.setLayout(level_layout)
+        self.level_slider = QSlider(Qt.Orientation.Horizontal)
+        self.level_slider.setRange(settings_mod.TRANSPARENCY_MIN, settings_mod.TRANSPARENCY_MAX)
+        self.level_slider.setValue(s["transparency"])
+        self.level_slider.setFixedWidth(200)
+        self.level_value = label(t("percent_value", value=s["transparency"]))
+        self.level_value.setFixedWidth(48)
+        self.level_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        level_layout.addWidget(self.level_slider)
+        level_layout.addWidget(self.level_value)
+        self.level_timer = QTimer(self)
+        self.level_timer.setSingleShot(True)
+        self.level_timer.timeout.connect(lambda: app.update_settings(transparency=self.level_slider.value()))
+        self.level_slider.valueChanged.connect(self._on_level)
+        self.level_card = settings_card("transparency", t("transparency_level"), t("transparency_hint"), level, body)
+        self.show_backdrop_state()
 
         # ---- closing
         section_header(t("section_closing"), body)
@@ -1720,6 +1738,15 @@ class SettingsPage(Page):
     def _on_backdrop(self, value):
         code = next(code for code, name in self.backdrop_values if name == value)
         self.app.update_settings(backdrop=code)
+        self.show_backdrop_state()
+
+    def show_backdrop_state(self):
+        """The level only means something while an effect is on."""
+        self.level_card.setEnabled(self.app.translucent and self.app.settings["backdrop"] != "none")
+
+    def _on_level(self, value):
+        self.level_value.setText(self.app.t("percent_value", value=value))
+        self.level_timer.start(120)   # the whole window is restyled: wait for the slider to settle
 
     def _on_theme(self, value):
         code = next(code for code, name in self.theme_values if name == value)
@@ -2141,7 +2168,8 @@ class App(QMainWindow):
                 winapi.set_dark_title_bar(int(self.winId()), dark)
             except Exception:
                 log.debug("title bar colour failed", exc_info=True)
-        THEME = Theme(dark=dark, mica=self.mica, backdrop=backdrop, accent=self.accent, **self.fonts)
+        THEME = Theme(dark=dark, mica=self.mica, backdrop=backdrop,
+                      transparency=self.settings["transparency"], accent=self.accent, **self.fonts)
         self.qapp.setStyleSheet(THEME.style_sheet())
         refresh_glyphs()
         self.update_theme_item()
@@ -2285,7 +2313,8 @@ class App(QMainWindow):
             return
         old, self.settings = self.settings, new
         core.log_titles = new["log_window_titles"]
-        if new["theme"] != old["theme"] or new["backdrop"] != old["backdrop"]:
+        if new["theme"] != old["theme"] or new["backdrop"] != old["backdrop"] \
+                or new["transparency"] != old["transparency"]:
             self.apply_theme()
         if new["language"] != old["language"]:
             # Rebuilt once the current event is handled: the settings page is replaced too.

@@ -20,12 +20,14 @@ DEFAULT_SETTINGS = {
     "background_include_system": False,
     "log_window_titles": False,
     "backdrop": "acrylic",
+    "transparency": 60,
 }
 THEMES = ("system", "light", "dark")
 # Window backdrops of Windows 11 22H2+, most transparent first.
 BACKDROPS = ("acrylic", "mica_alt", "mica", "none")
 BOOL_KEYS = tuple(key for key, value in DEFAULT_SETTINGS.items() if isinstance(value, bool))
 TIMEOUT_MIN, TIMEOUT_MAX = 1, 60
+TRANSPARENCY_MIN, TRANSPARENCY_MAX = 0, 100   # 0: WinUI's own surfaces; 60: default; 100: almost glass
 
 LOGGER_NAME = "closeallpython"
 
@@ -64,6 +66,9 @@ def parse_settings(raw):
     elif raw.get("mica") is False:
         # Settings written by versions 2.0 and 2.1 (Mica on or off).
         values["backdrop"] = "none"
+    level = raw.get("transparency")
+    if isinstance(level, int) and not isinstance(level, bool) and TRANSPARENCY_MIN <= level <= TRANSPARENCY_MAX:
+        values["transparency"] = level
     timeout = raw.get("close_timeout")
     if isinstance(timeout, int) and not isinstance(timeout, bool) and TIMEOUT_MIN <= timeout <= TIMEOUT_MAX:
         values["close_timeout"] = timeout

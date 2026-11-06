@@ -44,6 +44,41 @@ class TokenTests(unittest.TestCase):
             self.assertIn("Segoe Fluent Icons", sheet)
 
 
+class TransparencyLevelTests(unittest.TestCase):
+    def alpha(self, dark, level, name="card", backdrop="acrylic"):
+        theme = gui_theme.Theme(dark=dark, mica=True, backdrop=backdrop, transparency=level)
+        return gui_theme.parse_rgba(theme[name])[3]
+
+    def test_more_transparency_means_less_opaque_surfaces(self):
+        for dark in (False, True):
+            for name in ("card", "control", "input"):
+                alphas = [self.alpha(dark, level, name) for level in (0, 30, 60, 80, 100)]
+                self.assertEqual(alphas, sorted(alphas, reverse=True), (dark, name))
+                self.assertLess(alphas[-1], alphas[0])
+
+    def test_level_zero_is_winui_and_the_default_is_the_backdrop_set(self):
+        winui = gui_theme.Theme(dark=False, mica=False)["card"]
+        self.assertEqual(gui_theme.parse_rgba(gui_theme.Theme(dark=False, mica=True, transparency=0)["card"]),
+                         gui_theme.parse_rgba(winui))
+        default = gui_theme.Theme(dark=False, mica=True, backdrop="acrylic")
+        self.assertEqual(default.transparency, gui_theme.DEFAULT_TRANSPARENCY)
+        self.assertEqual(gui_theme.parse_rgba(default["card"]), gui_theme.parse_rgba(gui_theme.BACKDROP_LIGHT["card"]))
+
+    def test_the_level_is_clamped_and_ignored_without_an_effect(self):
+        self.assertEqual(self.alpha(True, 500), self.alpha(True, 100))
+        self.assertEqual(self.alpha(True, -5), self.alpha(True, 0))
+        plain = gui_theme.Theme(dark=True, mica=False, transparency=100)
+        self.assertEqual(plain["card"], gui_theme.DARK["card"])
+
+    def test_every_colour_still_parses_at_every_level(self):
+        for dark in (False, True):
+            for level in range(0, 101, 10):
+                theme = gui_theme.Theme(dark=dark, mica=True, transparency=level)
+                for name, value in theme.tokens.items():
+                    gui_theme.parse_rgba(value) if name != "window" else None
+                self.assertNotRegex(theme.style_sheet(), r"\{\w+\}")
+
+
 class GlyphTests(unittest.TestCase):
     def test_every_glyph_has_a_windows_and_a_fallback_character(self):
         for name, (windows_char, fallback) in gui_theme.GLYPHS.items():

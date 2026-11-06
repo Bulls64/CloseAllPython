@@ -180,13 +180,33 @@ class InterfaceSmokeTests(unittest.TestCase):
         self.pump(0.3)
         self.assertEqual(app.theme_item.text(), "Light mode")
 
+    def test_transparency_slider(self):
+        self.system.mica = True
+        self.app = self.open_app()
+        self.app.show_page("settings")
+        page = self.app.pages["settings"]
+        self.assertTrue(page.level_card.isEnabled())
+        before = self.gui.THEME["card"]
+        page.level_slider.setValue(100)
+        self.assertEqual(page.level_value.text(), "100 %")
+        self.pump(0.4, until=lambda: self.app.settings["transparency"] == 100)
+        self.assertEqual(self.app.settings["transparency"], 100)
+        self.assertNotEqual(self.gui.THEME["card"], before)
+        self.assertEqual(self.settings.load_settings()["transparency"], 100)   # remembered
+        page.backdrop_box.setCurrentText("Désactivé")
+        self.assertFalse(page.level_card.isEnabled())   # nothing to adjust without an effect
+
+    def test_transparency_slider_is_off_without_an_effect(self):
+        self.app.show_page("settings")
+        self.assertFalse(self.app.pages["settings"].level_card.isEnabled())
+
     def test_backdrop_follows_the_setting_in_both_themes(self):
         self.system.mica = True
         self.app = self.open_app()
         self.assertTrue(self.app.mica)
         self.assertEqual(self.gui.THEME["window"], "transparent")
         self.assertIn(("set_backdrop", "acrylic"), self.system.calls)   # the default: the most transparent
-        self.assertEqual(self.gui.THEME["layer"], "rgba(0, 0, 0, 0.0)")
+        self.assertEqual(self.gui.THEME["layer"], "rgba(0, 0, 0, 0.000)")
         self.system.calls.clear()
         self.app.update_settings(theme="light")
         self.assertTrue(self.app.mica)   # in the light theme too

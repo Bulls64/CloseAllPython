@@ -125,6 +125,41 @@ BACKDROP_DARK = {
 # Mica only tints: a light veil on the content layer keeps it apart from the navigation pane.
 MICA_LAYER = {False: "rgba(255, 255, 255, 0.2)", True: "rgba(255, 255, 255, 0.025)"}
 
+# The most transparent surfaces (level 100), nearly glass. The levels in between are interpolated:
+# 0 = WinUI's own colours (LIGHT / DARK), DEFAULT_TRANSPARENCY = the BACKDROP sets above, 100 = these.
+MAX_LIGHT = {
+    "layer": "rgba(255, 255, 255, 0.0)",
+    "card": "rgba(255, 255, 255, 0.07)",
+    "card_hover": "rgba(255, 255, 255, 0.17)",
+    "card_secondary": "rgba(255, 255, 255, 0.03)",
+    "control": "rgba(255, 255, 255, 0.13)",
+    "control_hover": "rgba(255, 255, 255, 0.25)",
+    "control_pressed": "rgba(255, 255, 255, 0.08)",
+    "input": "rgba(255, 255, 255, 0.13)",
+    "input_focus": "rgba(255, 255, 255, 0.5)",
+}
+MAX_DARK = {
+    "layer": "rgba(0, 0, 0, 0.0)",
+    "card": "rgba(255, 255, 255, 0.015)",
+    "card_hover": "rgba(255, 255, 255, 0.05)",
+    "card_secondary": "rgba(255, 255, 255, 0.0)",
+    "control": "rgba(255, 255, 255, 0.03)",
+    "control_hover": "rgba(255, 255, 255, 0.06)",
+    "control_pressed": "rgba(255, 255, 255, 0.015)",
+    "input": "rgba(255, 255, 255, 0.03)",
+    "input_focus": "rgba(20, 20, 20, 0.3)",
+}
+DEFAULT_TRANSPARENCY = 60
+
+
+def mix(first, second, amount):
+    """Colour between two colours (hex or rgba), as an rgba() string."""
+    a, b = parse_rgba(first), parse_rgba(second)
+    r, g, bl = (round(x + (y - x) * amount) for x, y in zip(a[:3], b[:3]))
+    alpha = (a[3] + (b[3] - a[3]) * amount) / 255
+    return f"rgba({r}, {g}, {bl}, {alpha:.3f})"
+
+
 # Letter tiles of applications without an icon.
 TILE_COLORS = ("#2f6fae", "#b8552c", "#2f7f87", "#a34474", "#5f53b8", "#4a5263", "#4d58b0", "#3f7d3a", "#8a5a1f")
 
@@ -228,6 +263,7 @@ class Theme:
     dark: bool
     mica: bool                     # the window shows a backdrop (Mica or Acrylic): translucent background
     backdrop: str = "mica"         # which one: "acrylic", "mica_alt" or "mica"
+    transparency: int = DEFAULT_TRANSPARENCY   # 0..100: how much the backdrop shows through the surfaces
     accent: tuple = DEFAULT_ACCENT
     ui_font: str = "Segoe UI"
     display_font: str = "Segoe UI"
@@ -238,9 +274,18 @@ class Theme:
     def tokens(self):
         values = dict(DARK if self.dark else LIGHT)
         if self.mica:
-            values.update(BACKDROP_DARK if self.dark else BACKDROP_LIGHT)
+            middle = dict(BACKDROP_DARK if self.dark else BACKDROP_LIGHT)
             if self.backdrop != "acrylic":
-                values["layer"] = MICA_LAYER[self.dark]
+                middle["layer"] = MICA_LAYER[self.dark]
+            top = MAX_DARK if self.dark else MAX_LIGHT
+            level = max(0, min(100, self.transparency))
+            for name, value in middle.items():
+                if level <= DEFAULT_TRANSPARENCY:
+                    values[name] = mix(values[name], value, level / DEFAULT_TRANSPARENCY)
+                elif name in top:
+                    values[name] = mix(value, top[name], (level - DEFAULT_TRANSPARENCY) / (100 - DEFAULT_TRANSPARENCY))
+                else:
+                    values[name] = value
         accent = self.accent[1 if self.dark else 0]
         r, g, b, _a = parse_rgba(accent)
         values["accent"] = accent
