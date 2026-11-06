@@ -151,6 +151,8 @@ GLYPHS = {
     "warning": ("", "⚠"),
     "globe": ("", "◍"),
     "color": ("", "◐"),
+    "sun": ("", "☀"),
+    "moon": ("", "☾"),
     "transparency": ("", "◈"),
     "lightning": ("", "ϟ"),
     "timer": ("", "◷"),

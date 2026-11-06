@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.3.0 (2026-11-06)
+
+- Dark / light mode button in the navigation pane, above Settings: one click switches the theme (it shows what a click gives: the sun in the dark theme, the moon in the light one). The choice is remembered and shown in *Settings › Display › Theme*.
+
 ## 2.2.0 (2026-11-02)
 
 Much more transparency
@@ -187,6 +191,10 @@ Project
 ---
 
 # Journal des modifications (version française)
+
+## 2.3.0 (2026-11-06)
+
+- Bouton Mode sombre / Mode clair dans le volet de navigation, au-dessus de Paramètres : un clic change le thème (il montre ce que donne le clic : le soleil en thème sombre, la lune en thème clair). Le choix est mémorisé et visible dans *Paramètres › Affichage › Thème*.
 
 ## 2.2.0 (2026-11-02)
 

@@ -9,6 +9,8 @@ TEXT = {
         "nav_apps": "Applications",
         "nav_log": "Log",
         "nav_settings": "Settings",
+        "nav_to_dark": "Dark mode",
+        "nav_to_light": "Light mode",
         # Application list
         "apps_title": "Open applications",
         "admin_button": "Administrator mode",
@@ -261,6 +263,8 @@ TEXT = {
         "nav_apps": "Applications",
         "nav_log": "Journal",
         "nav_settings": "Paramètres",
+        "nav_to_dark": "Mode sombre",
+        "nav_to_light": "Mode clair",
         "apps_title": "Applications ouvertes",
         "admin_button": "Mode administrateur",
         "refresh": "Actualiser",

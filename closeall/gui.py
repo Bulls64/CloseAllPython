@@ -1551,10 +1551,10 @@ class SettingsPage(Page):
         language.currentTextChanged.connect(self._on_language)
         settings_card("globe", t("language"), t("language_hint"), language, body)
         self.theme_values = [(code, t(f"theme_{code}")) for code in settings_mod.THEMES]
-        theme = ComboBox([name for _, name in self.theme_values])
-        theme.setCurrentText(dict(self.theme_values)[s["theme"]])
-        theme.currentTextChanged.connect(self._on_theme)
-        settings_card("color", t("theme"), t("theme_hint"), theme, body)
+        self.theme_box = ComboBox([name for _, name in self.theme_values])
+        self.theme_box.setCurrentText(dict(self.theme_values)[s["theme"]])
+        self.theme_box.currentTextChanged.connect(self._on_theme)
+        settings_card("color", t("theme"), t("theme_hint"), self.theme_box, body)
         supported = app.translucent
         self.backdrop_values = [(code, t(f"backdrop_{code}")) for code in settings_mod.BACKDROPS]
         self.backdrop_box = ComboBox([name for _, name in self.backdrop_values])
@@ -1711,6 +1711,12 @@ class SettingsPage(Page):
         code = next(code for code, name in self.language_values if name == value)
         self.app.update_settings(language=code)
 
+    def show_theme(self):
+        """The theme changed elsewhere (the dark / light button): show it in the list."""
+        self.theme_box.blockSignals(True)
+        self.theme_box.setCurrentText(dict(self.theme_values)[self.app.settings["theme"]])
+        self.theme_box.blockSignals(False)
+
     def _on_backdrop(self, value):
         code = next(code for code, name in self.backdrop_values if name == value)
         self.app.update_settings(backdrop=code)
@@ -1853,18 +1859,25 @@ class Updates:
 class NavItem(QAbstractButton, Painted):
     """A NavigationView item: icon and label; the selected one gets a fill and an accent mark."""
 
-    def __init__(self, glyph, text):
+    def __init__(self, glyph, text, page=True):
         super().__init__()
         self.glyph, self.compact = glyph, False
         self.setText(text)
-        self.setCheckable(True)
-        self.setAutoExclusive(True)
+        if page:   # a page of the window; otherwise a plain action (never selected)
+            self.setCheckable(True)
+            self.setAutoExclusive(True)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover)
         self.setFixedHeight(36)
         self.setToolTip(text)
 
     def set_compact(self, compact):
         self.compact = compact
+        self.update()
+
+    def set_content(self, glyph, text):
+        self.glyph = glyph
+        self.setText(text)
+        self.setToolTip(text)
         self.update()
 
     def paintEvent(self, _event):
@@ -2131,6 +2144,7 @@ class App(QMainWindow):
         THEME = Theme(dark=dark, mica=self.mica, backdrop=backdrop, accent=self.accent, **self.fonts)
         self.qapp.setStyleSheet(THEME.style_sheet())
         refresh_glyphs()
+        self.update_theme_item()
         for widget in self.findChildren(QWidget):
             if isinstance(widget, Painted):
                 widget.update()
@@ -2176,6 +2190,12 @@ class App(QMainWindow):
         for name in ("apps", "background", "log"):
             nav.addWidget(self.nav[name])
         nav.addStretch(1)
+        # Dark / light switch: shows what a click gives (the sun in the dark theme, the moon in the light).
+        self.theme_item = NavItem("sun", "", page=False)
+        self.theme_item.set_compact(self.nav_compact)
+        self.theme_item.clicked.connect(self.toggle_theme)
+        self.update_theme_item()
+        nav.addWidget(self.theme_item)
         nav.addWidget(self.nav["settings"])
         layout.addWidget(self.nav_pane)
         layer = QFrame()
@@ -2196,6 +2216,21 @@ class App(QMainWindow):
         self.list_page.refresh()
         self.show_page(self.current if self.current != "closing" else "apps")
 
+    def update_theme_item(self):
+        if getattr(self, "theme_item", None) is None:
+            return
+        if self.is_dark():
+            self.theme_item.set_content("sun", self.t("nav_to_light"))
+        else:
+            self.theme_item.set_content("moon", self.t("nav_to_dark"))
+
+    def toggle_theme(self):
+        """Switch between the dark and the light theme (it replaces 'Follow Windows' until changed)."""
+        self.update_settings(theme="light" if self.is_dark() else "dark")
+        settings = self.pages.get("settings")
+        if settings is not None:
+            settings.show_theme()
+
     def install_translator(self):
         """Qt's own texts (the Copy / Paste menu of text fields) in the interface's language."""
         if getattr(self, "translator", None) is not None:
@@ -2214,7 +2249,7 @@ class App(QMainWindow):
             return
         self.nav_compact = compact
         self.nav_pane.setFixedWidth(NAV_COMPACT_WIDTH if self.nav_compact else NAV_WIDTH)
-        for item in self.nav.values():
+        for item in (*self.nav.values(), self.theme_item):
             item.set_compact(self.nav_compact)
 
     def show_page(self, name):

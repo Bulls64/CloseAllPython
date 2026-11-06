@@ -159,6 +159,27 @@ class InterfaceSmokeTests(unittest.TestCase):
         self.assertIs(self.app.list_page, page)
         self.assertIn(("dark_title_bar", False), self.system.calls)
 
+    def test_dark_light_button(self):
+        app = self.app
+        self.assertTrue(app.is_dark())
+        self.assertEqual(app.theme_item.text(), "Mode clair")   # what a click gives
+        self.assertEqual(app.theme_item.glyph, "sun")
+        app.theme_item.click()
+        self.assertEqual(app.settings["theme"], "light")
+        self.assertFalse(self.gui.THEME.dark)
+        self.assertEqual(app.theme_item.text(), "Mode sombre")
+        self.assertEqual(app.theme_item.glyph, "moon")
+        self.assertEqual(self.settings.load_settings()["theme"], "light")   # remembered
+        app.theme_item.click()
+        self.assertEqual(app.settings["theme"], "dark")
+        self.assertTrue(self.gui.THEME.dark)
+        self.assertFalse(app.theme_item.isChecked())   # an action, never a selected page
+        app.show_page("settings")
+        self.assertEqual(app.pages["settings"].theme_box.currentText(), "Sombre")
+        app.update_settings(language="en")
+        self.pump(0.3)
+        self.assertEqual(app.theme_item.text(), "Light mode")
+
     def test_backdrop_follows_the_setting_in_both_themes(self):
         self.system.mica = True
         self.app = self.open_app()
