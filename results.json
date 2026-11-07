@@ -1,0 +1,137 @@
+[
+  {
+    "name": "applications-dark",
+    "mica": true,
+    "window": [
+      19,
+      20,
+      985,
+      682
+    ],
+    "screen": [
+      1024,
+      720
+    ],
+    "exit_code": 0
+  },
+  {
+    "name": "applications-light",
+    "mica": true,
+    "window": [
+      19,
+      20,
+      985,
+      682
+    ],
+    "screen": [
+      1024,
+      720
+    ],
+    "exit_code": 0
+  },
+  {
+    "name": "applications-fr",
+    "mica": true,
+    "window": [
+      19,
+      20,
+      985,
+      682
+    ],
+    "screen": [
+      1024,
+      720
+    ],
+    "exit_code": 0
+  },
+  {
+    "name": "confirmation-dark",
+    "mica": true,
+    "window": [
+      19,
+      20,
+      985,
+      682
+    ],
+    "screen": [
+      1024,
+      720
+    ],
+    "exit_code": 0
+  },
+  {
+    "name": "closing-dark",
+    "mica": true,
+    "window": [
+      19,
+      20,
+      985,
+      682
+    ],
+    "screen": [
+      1024,
+      720
+    ],
+    "exit_code": 0
+  },
+  {
+    "name": "closing-fr",
+    "mica": true,
+    "window": [
+      19,
+      20,
+      985,
+      682
+    ],
+    "screen": [
+      1024,
+      720
+    ],
+    "exit_code": 0
+  },
+  {
+    "name": "background-dark",
+    "mica": true,
+    "window": [
+      19,
+      20,
+      985,
+      682
+    ],
+    "screen": [
+      1024,
+      720
+    ],
+    "exit_code": 0
+  },
+  {
+    "name": "settings-dark",
+    "mica": true,
+    "window": [
+      19,
+      20,
+      985,
+      682
+    ],
+    "screen": [
+      1024,
+      720
+    ],
+    "exit_code": 0
+  },
+  {
+    "name": "settings-light",
+    "mica": true,
+    "window": [
+      19,
+      20,
+      985,
+      682
+    ],
+    "screen": [
+      1024,
+      720
+    ],
+    "exit_code": 0
+  }
+]
