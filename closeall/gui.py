@@ -46,6 +46,7 @@ EXPLORER_REFRESH_MS = (700, 2000)
 RETRY_REFRESH_MS = 150
 UPDATE_STARTUP_DELAY_MS = 2000   # the automatic check waits until the window is up
 NAV_WIDTH, NAV_COMPACT_WIDTH = 248, 48
+TOP_GAP = 4                       # between the title bar and the content
 NAV_AUTO_COMPACT = 920            # narrower windows show the navigation pane as icons only
 PAD = 36                          # page margins
 
@@ -2199,7 +2200,9 @@ class App(QMainWindow):
         self.install_translator()
         root = QWidget()
         root.setObjectName("root")
-        layout = hbox()
+        # A few pixels under the title bar: the top edge of the content never touches the header
+        # (with the frame extended into the window, it could overlap it slightly).
+        layout = hbox((0, TOP_GAP, 0, 0))
         root.setLayout(layout)
         self.nav_pane = QWidget()
         self.nav_pane.setObjectName("nav")

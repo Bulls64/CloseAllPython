@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.1 (2026-11-07)
+
+- The top of the window no longer touches the title bar: a few pixels of margin keep the content from overlapping the header.
+
 ## 2.4.0 (2026-11-06)
 
 - Transparency slider in *Settings › Display*: from 0 % (WinUI's own surfaces) to 100 % (nearly glass), 60 % by default (the look of 2.2 and 2.3). The window follows the slider as you move it, and the level is remembered. It is greyed out when the effect is off or unavailable.
@@ -195,6 +199,10 @@ Project
 ---
 
 # Journal des modifications (version française)
+
+## 2.4.1 (2026-11-07)
+
+- Le haut de la fenêtre ne touche plus la barre de titre : quelques pixels de marge évitent que le contenu déborde sur l'en-tête.
 
 ## 2.4.0 (2026-11-06)
 
