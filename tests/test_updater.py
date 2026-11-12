@@ -17,6 +17,20 @@ def fake_exe(machine=0x8664, size=5000):
     return bytes(header) + b"\x00" * (size - len(header))
 
 
+# The tests describe the x64 build, whatever processor runs them (the CI also runs them on an
+# ARM64 Windows); the ARM64 cases say so explicitly.
+PROCESS_ARCH = updater.process_arch
+_arch = mock.patch.object(updater, "process_arch", lambda: "x64")
+
+
+def setUpModule():
+    _arch.start()
+
+
+def tearDownModule():
+    _arch.stop()
+
+
 EXE = fake_exe()
 EXE_ARM64 = fake_exe(0xAA64)
 URL = f"https://github.com/{updater.REPOSITORY}/releases/download/v9.0.0/"
@@ -135,9 +149,9 @@ class FetchTests(unittest.TestCase):
 
     def test_architecture_of_the_running_python(self):
         with mock.patch("sysconfig.get_platform", return_value="win-arm64"):
-            self.assertEqual(updater.process_arch(), "arm64")
+            self.assertEqual(PROCESS_ARCH(), "arm64")
         with mock.patch("sysconfig.get_platform", return_value="win-amd64"):
-            self.assertEqual(updater.process_arch(), "x64")
+            self.assertEqual(PROCESS_ARCH(), "x64")
 
     def test_pe_machine(self):
         self.assertEqual(updater.pe_machine(EXE), 0x8664)
