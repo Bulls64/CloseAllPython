@@ -1638,7 +1638,8 @@ class SettingsPage(Page):
         head.addWidget(logo)
         names = vbox()
         names.addWidget(label("CloseAllPython", "strong"))
-        names.addWidget(label(t("about_line", version=__version__), "caption", "secondary"))
+        arch = " · ARM64" if updater.process_arch() == "arm64" else ""
+        names.addWidget(label(t("about_line", version=__version__ + arch), "caption", "secondary"))
         head.addLayout(names, 1)
         project = button(updater.PROJECT_PAGE.removeprefix("https://"), self._open_project, "link")
         project.setCursor(Qt.CursorShape.PointingHandCursor)

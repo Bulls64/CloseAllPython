@@ -1,3 +1,3 @@
 """CloseAllPython: list visible Windows windows and close the processes that own them."""
 
-__version__ = "2.4.1"
+__version__ = "2.5.0"

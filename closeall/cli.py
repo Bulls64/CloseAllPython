@@ -270,7 +270,8 @@ def run_self_test(out=None, err=None, checks=None):
             _emit(err, f"FAIL {name}\n{traceback.format_exc()}")
         else:
             _emit(out, f"ok   {name}")
-    _emit(out, f"CloseAllPython {__version__} self-test: {'FAILED' if failed else 'passed'}")
+    from .updater import process_arch
+    _emit(out, f"CloseAllPython {__version__} ({process_arch()}) self-test: {'FAILED' if failed else 'passed'}")
     return 1 if failed else 0
 
 

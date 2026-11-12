@@ -10,7 +10,15 @@ from unittest import mock
 
 from closeall import __version__, cli, settings, updater
 
-EXE = b"MZ" + b"\x90" * 5000
+def fake_exe(machine=0x8664, size=5000):
+    """The start of a Windows executable (DOS header, PE signature, Machine field), then padding."""
+    header = bytearray(b"MZ" + b"\x90" * 0x3A) + (0x80).to_bytes(4, "little")
+    header += b"\x00" * (0x80 - len(header)) + b"PE\0\0" + machine.to_bytes(2, "little")
+    return bytes(header) + b"\x00" * (size - len(header))
+
+
+EXE = fake_exe()
+EXE_ARM64 = fake_exe(0xAA64)
 URL = f"https://github.com/{updater.REPOSITORY}/releases/download/v9.0.0/"
 
 
@@ -106,6 +114,37 @@ class FetchTests(unittest.TestCase):
         self.assertEqual(updater.asset_for(release, r"C:\Tools\closeallpython.exe").name, updater.GUI_ASSET)
         self.assertEqual(updater.asset_for(release, r"C:\Tools\CloseAll-cli.exe").name, updater.CLI_ASSET)
         self.assertEqual(updater.asset_for(release, r"C:\Tools\renamed.exe").name, updater.GUI_ASSET)
+
+    def test_arm64_executables_get_the_arm64_files(self):
+        names = (updater.GUI_ASSET, updater.CLI_ASSET, updater.GUI_ASSET_ARM64, updater.CLI_ASSET_ARM64)
+        release = updater.fetch_latest(Opener(release_json(assets=names)))
+        choose = updater.asset_for
+        self.assertEqual(choose(release, r"C:\Tools\CloseAllPython-ARM64.exe", "arm64").name, updater.GUI_ASSET_ARM64)
+        self.assertEqual(choose(release, r"C:\Tools\CloseAllPython-CLI-ARM64.exe", "arm64").name,
+                         updater.CLI_ASSET_ARM64)
+        self.assertEqual(choose(release, r"C:\Tools\closeall.exe", "arm64").name, updater.GUI_ASSET_ARM64)
+        # The x64 build stays x64, even when renamed, and even on a Windows on Arm PC (emulated).
+        self.assertEqual(choose(release, r"C:\Tools\CloseAllPython-ARM64.exe", "x64").name, updater.GUI_ASSET)
+        self.assertEqual(choose(release, r"C:\Tools\CloseAllPython-CLI.exe", "x64").name, updater.CLI_ASSET)
+
+    def test_arm64_without_an_arm64_file_is_not_given_the_x64_one(self):
+        release = updater.fetch_latest(Opener())   # an older release: x64 files only
+        with self.assertRaises(updater.UpdateError) as ctx:
+            updater.asset_for(release, "CloseAllPython-ARM64.exe", "arm64")
+        self.assertEqual(ctx.exception.key, "update_err_no_asset")
+
+    def test_architecture_of_the_running_python(self):
+        with mock.patch("sysconfig.get_platform", return_value="win-arm64"):
+            self.assertEqual(updater.process_arch(), "arm64")
+        with mock.patch("sysconfig.get_platform", return_value="win-amd64"):
+            self.assertEqual(updater.process_arch(), "x64")
+
+    def test_pe_machine(self):
+        self.assertEqual(updater.pe_machine(EXE), 0x8664)
+        self.assertEqual(updater.pe_machine(EXE_ARM64), 0xAA64)
+        self.assertIsNone(updater.pe_machine(b"MZ" + b"\x90" * 5000))   # no PE header
+        self.assertIsNone(updater.pe_machine(b"PK" + EXE[2:]))
+        self.assertIsNone(updater.pe_machine(b"MZ"))
 
     def test_asset_without_checksum_is_refused(self):
         release = updater.fetch_latest(Opener(release_json(digest=False)))
@@ -220,6 +259,23 @@ class InstallTests(unittest.TestCase):
             with self.assertRaises(updater.UpdateError):
                 updater.update(self.exe, release, Opener(payload=payload))
             self.assertEqual(self.names(), ["CloseAllPython.exe"])
+
+    def test_arm64_update_and_wrong_processor(self):
+        names = (updater.GUI_ASSET, updater.GUI_ASSET_ARM64)
+        exe = self.dir / "CloseAllPython-ARM64.exe"
+        exe.write_bytes(b"MZ old version")
+        release = updater.fetch_latest(Opener(release_json(payload=EXE_ARM64, assets=names)))
+        updater.update(exe, release, Opener(payload=EXE_ARM64), arch="arm64")
+        self.assertEqual(exe.read_bytes(), EXE_ARM64)
+        updater.cleanup(exe)
+        # An x64 file published under the ARM64 name (a packaging mistake) is refused.
+        exe.write_bytes(b"MZ old version")
+        release = updater.fetch_latest(Opener(release_json(payload=EXE, assets=names)))
+        with self.assertRaises(updater.UpdateError) as ctx:
+            updater.update(exe, release, Opener(payload=EXE), arch="arm64")
+        self.assertEqual(ctx.exception.key, "update_err_verify")
+        self.assertEqual(exe.read_bytes(), b"MZ old version")
+        exe.unlink()
 
     def test_failed_swap_restores_the_old_version(self):
         new = self.dir / "CloseAllPython.exe.new"

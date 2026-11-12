@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.5.0 (2026-11-12)
+
+Native ARM64 version
+- New native ARM64 executables for Windows on Arm PCs (Snapdragon, Surface Pro X...): `CloseAllPython-ARM64.exe` and `CloseAllPython-CLI-ARM64.exe`. They run without x64 emulation: faster start, smoother interface, less battery.
+- They are built, tested and self-checked on a real ARM64 Windows machine by the release workflow, next to the x64 ones; the workflow also checks that each file is built for its processor.
+- Updates keep the processor: an ARM64 executable updates itself with the ARM64 file, an x64 one with the x64 file, whatever its file name. A downloaded file built for the other processor is refused.
+- *Settings › About* shows "ARM64" after the version number on the ARM64 build.
+
 ## 2.4.1 (2026-11-07)
 
 - The top of the window no longer touches the title bar: a few pixels of margin keep the content from overlapping the header.
@@ -199,6 +207,14 @@ Project
 ---
 
 # Journal des modifications (version française)
+
+## 2.5.0 (2026-11-12)
+
+Version native ARM64
+- Nouveaux exécutables natifs ARM64 pour les PC Windows on Arm (Snapdragon, Surface Pro X…) : `CloseAllPython-ARM64.exe` et `CloseAllPython-CLI-ARM64.exe`. Ils tournent sans émulation x64 : démarrage plus rapide, interface plus fluide, moins de batterie consommée.
+- Ils sont compilés, testés et vérifiés sur une vraie machine Windows ARM64 par le workflow de release, à côté des versions x64 ; le workflow vérifie aussi que chaque fichier est bien compilé pour son processeur.
+- Les mises à jour gardent le processeur : un exécutable ARM64 se met à jour avec le fichier ARM64, un x64 avec le fichier x64, quel que soit son nom. Un fichier téléchargé compilé pour l'autre processeur est refusé.
+- *Paramètres › À propos* affiche « ARM64 » après le numéro de version sur la version ARM64.
 
 ## 2.4.1 (2026-11-07)
 

@@ -63,7 +63,7 @@ CloseAllPython lists the windows you see in Alt+Tab and closes the applications 
 
 ### Download
 
-Get `CloseAllPython.exe` (graphical application) and `CloseAllPython-CLI.exe` (command line) from the [Releases](../../releases) page. No installation: run the executable. Windows 10 or 11 is required.
+Get `CloseAllPython.exe` (graphical application) and `CloseAllPython-CLI.exe` (command line) from the [Releases](../../releases) page. On a Windows on Arm PC (Snapdragon, Surface Pro X...), take the native `CloseAllPython-ARM64.exe` and `CloseAllPython-CLI-ARM64.exe` instead: faster and lighter on the battery than the x64 files, which Windows runs under emulation. No installation: run the executable. Windows 10 or 11 is required; each executable updates itself with the file for its own processor.
 
 The executables are built by GitHub Actions from the tagged source code ([workflow](.github/workflows/build.yml)), so each release matches the code of its version.
 
@@ -211,7 +211,7 @@ CloseAllPython liste les fenêtres visibles dans Alt+Tab et ferme les applicatio
 
 ### Téléchargement
 
-Récupérez `CloseAllPython.exe` (application graphique) et `CloseAllPython-CLI.exe` (ligne de commande) sur la page [Releases](../../releases). Aucune installation : lancez l'exécutable. Windows 10 ou 11 est nécessaire.
+Récupérez `CloseAllPython.exe` (application graphique) et `CloseAllPython-CLI.exe` (ligne de commande) sur la page [Releases](../../releases). Sur un PC Windows on Arm (Snapdragon, Surface Pro X…), prenez plutôt les versions natives `CloseAllPython-ARM64.exe` et `CloseAllPython-CLI-ARM64.exe` : plus rapides et plus économes en batterie que les fichiers x64, que Windows exécute en émulation. Aucune installation : lancez l'exécutable. Windows 10 ou 11 est nécessaire ; chaque exécutable se met à jour avec le fichier de son propre processeur.
 
 Les exécutables sont compilés par GitHub Actions à partir du code source taggé ([workflow](.github/workflows/build.yml)) : chaque release correspond exactement au code de sa version.
 

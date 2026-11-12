@@ -31,6 +31,11 @@ PROJECT_PAGE = f"https://github.com/{REPOSITORY}"   # shown in Settings › Abou
 LATEST_API = f"https://api.github.com/repos/{REPOSITORY}/releases/latest"
 RELEASES_PAGE = f"https://github.com/{REPOSITORY}/releases/latest"
 GUI_ASSET, CLI_ASSET = "CloseAllPython.exe", "CloseAllPython-CLI.exe"
+# Native ARM64 builds (Windows on Arm: Snapdragon PCs, Surface Pro X...).
+GUI_ASSET_ARM64, CLI_ASSET_ARM64 = "CloseAllPython-ARM64.exe", "CloseAllPython-CLI-ARM64.exe"
+ASSETS = {"x64": (GUI_ASSET, CLI_ASSET), "arm64": (GUI_ASSET_ARM64, CLI_ASSET_ARM64)}
+# The `Machine` field of a PE header: an executable built for the other processor is refused.
+PE_MACHINES = {"x64": 0x8664, "arm64": 0xAA64}
 API_TIMEOUT, DOWNLOAD_TIMEOUT = 10, 60
 CHUNK = 256 * 1024
 MAX_SIZE = 200 * 1024 * 1024
@@ -166,12 +171,27 @@ def current_executable():
     return Path(sys.executable).resolve() if getattr(sys, "frozen", False) else None
 
 
-def asset_for(release, exe_path):
-    """The release file that replaces `exe_path` (same name; a renamed copy is matched by kind)."""
+def process_arch():
+    """"arm64" when this Python (so this executable) is a native ARM64 build, else "x64".
+
+    An x64 executable emulated on Windows on Arm answers "x64": it is updated with the x64 file,
+    the one its user chose to run."""
+    import sysconfig
+
+    return "arm64" if sysconfig.get_platform().lower().endswith("arm64") else "x64"
+
+
+def asset_arch(name):
+    return "arm64" if name.lower().removesuffix(".exe").endswith("-arm64") else "x64"
+
+
+def asset_for(release, exe_path, arch=None):
+    """The release file that replaces `exe_path`: the same kind (graphical or command line) for the
+    same processor as the running executable, whatever the file was renamed to."""
+    arch = arch or process_arch()
     name = ntpath.basename(str(exe_path)).lower()
-    asset = release.assets.get(name)
-    if asset is None:
-        asset = release.assets.get((CLI_ASSET if "cli" in name else GUI_ASSET).lower())
+    gui, cli_name = ASSETS[arch]
+    asset = release.assets.get((cli_name if "cli" in name else gui).lower())
     if asset is None:
         raise UpdateError("update_err_no_asset", name=ntpath.basename(str(exe_path)))
     if not asset.sha256:
@@ -179,6 +199,17 @@ def asset_for(release, exe_path):
     if not is_project_url(asset.url, "releases/download") or not 0 < asset.size <= MAX_SIZE:
         raise UpdateError("update_err_response")
     return asset
+
+
+def pe_machine(data):
+    """The processor a Windows executable is built for (its PE `Machine` field), from the start of
+    the file; None when `data` does not start like a Windows executable."""
+    if len(data) < 0x40 or not data.startswith(b"MZ"):
+        return None
+    offset = int.from_bytes(data[0x3C:0x40], "little")
+    if offset + 6 > len(data) or data[offset:offset + 4] != b"PE\0\0":
+        return None
+    return int.from_bytes(data[offset + 4:offset + 6], "little")
 
 
 def _remove(path):
@@ -204,8 +235,8 @@ def download(asset, destination, opener=urllib.request.urlopen, progress=None):
                 done += len(chunk)
                 if done > asset.size:
                     raise UpdateError("update_err_verify")
-                if done == len(chunk) and not chunk.startswith(b"MZ"):
-                    raise UpdateError("update_err_verify")
+                if done == len(chunk) and pe_machine(chunk) != PE_MACHINES[asset_arch(asset.name)]:
+                    raise UpdateError("update_err_verify")   # not a Windows executable for this processor
                 digest.update(chunk)
                 handle.write(chunk)
                 if progress:
@@ -256,10 +287,10 @@ def install(new_file, exe_path):
     return exe_path
 
 
-def update(exe_path, release, opener=urllib.request.urlopen, progress=None):
+def update(exe_path, release, opener=urllib.request.urlopen, progress=None, arch=None):
     """Download and install the release's executable over `exe_path`."""
     exe_path = Path(exe_path)
-    asset = asset_for(release, exe_path)
+    asset = asset_for(release, exe_path, arch)
     new_file = exe_path.with_name(exe_path.name + NEW_SUFFIX)
     download(asset, new_file, opener, progress)
     install(new_file, exe_path)

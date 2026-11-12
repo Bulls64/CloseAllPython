@@ -1,6 +1,7 @@
-# Tests and executables on every push and pull request. A pushed version tag (v1.9.1...) also
-# publishes the two executables built and checked by the `build` job on the GitHub release of
-# that tag, with notes taken from CHANGELOG.md: the published files are exactly the tested ones.
+# Tests and executables on every push and pull request, for x64 and natively for ARM64 (Windows on
+# Arm), each on a runner of that processor. A pushed version tag (v1.9.1...) also publishes the
+# four executables built and checked by the `build` jobs on the GitHub release of that tag, with
+# notes taken from CHANGELOG.md: the published files are exactly the tested ones.
 name: Tests and release
 
 on:
@@ -23,12 +24,22 @@ permissions:
 
 jobs:
   test:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-latest
+          - arch: arm64
+            runner: windows-11-arm
+    name: test (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.14"
+          architecture: ${{ matrix.arch }}
           cache: pip
           cache-dependency-path: requirements*.txt
       - name: Install dependencies
@@ -38,12 +49,28 @@ jobs:
         run: python -m unittest discover -s tests -t . -v
 
   build:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-latest
+            suffix: ""
+            machine: "34404"   # 0x8664, the PE Machine field of an x64 executable
+          - arch: arm64
+            runner: windows-11-arm
+            suffix: "-ARM64"
+            machine: "43620"   # 0xAA64: ARM64
+    name: build (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    env:
+      SUFFIX: ${{ matrix.suffix }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.14"
+          architecture: ${{ matrix.arch }}
           cache: pip
           cache-dependency-path: requirements*.txt
       - name: Install build dependencies
@@ -54,6 +81,10 @@ jobs:
         run: |
           python -m PyInstaller --noconfirm --clean --distpath dist --workpath build CloseAllPython.spec
           python -m PyInstaller --noconfirm --clean --distpath dist --workpath build CloseAllPython-CLI.spec
+          if [ -n "$SUFFIX" ]; then
+            mv dist/CloseAllPython.exe "dist/CloseAllPython$SUFFIX.exe"
+            mv dist/CloseAllPython-CLI.exe "dist/CloseAllPython-CLI$SUFFIX.exe"
+          fi
           ls -l dist
       - name: Check that the executables start
         # --self-test imports every bundled module and makes each kind of system call (windows,
@@ -62,21 +93,31 @@ jobs:
         timeout-minutes: 5
         shell: pwsh
         run: |
+          $gui = "dist/CloseAllPython$env:SUFFIX.exe"
+          $cli = "dist/CloseAllPython-CLI$env:SUFFIX.exe"
+          # Built for the right processor: native ARM64, not x64 run under emulation.
+          foreach ($exe in $gui, $cli) {
+            $bytes = [System.IO.File]::ReadAllBytes($exe)
+            $machine = [BitConverter]::ToUInt16($bytes, [BitConverter]::ToInt32($bytes, 0x3C) + 4)
+            if ($machine -ne ${{ matrix.machine }}) { throw "$exe is built for machine $machine, not ${{ matrix.arch }}" }
+          }
           $version = python -c "import closeall; print(closeall.__version__)"
-          $printed = (& dist/CloseAllPython-CLI.exe --version | Out-String).Trim()
+          $printed = (& $cli --version | Out-String).Trim()
           if ($printed -ne "CloseAllPython $version") { throw "CLI --version printed '$printed'" }
-          & dist/CloseAllPython-CLI.exe --self-test
-          if ($LASTEXITCODE -ne 0) { throw "CloseAllPython-CLI.exe --self-test failed ($LASTEXITCODE)" }
-          & dist/CloseAllPython-CLI.exe --no-ui --all --dry-run
-          if ($LASTEXITCODE -ne 0) { throw "CloseAllPython-CLI.exe --no-ui --all --dry-run failed ($LASTEXITCODE)" }
-          $gui = Start-Process -FilePath dist/CloseAllPython.exe -ArgumentList "--self-test" -Wait -PassThru
-          if ($gui.ExitCode -ne 0) { throw "CloseAllPython.exe --self-test failed ($($gui.ExitCode))" }
+          $test = (& $cli --self-test | Out-String)
+          Write-Output $test
+          if ($LASTEXITCODE -ne 0) { throw "$cli --self-test failed ($LASTEXITCODE)" }
+          if ($test -notmatch "\(${{ matrix.arch }}\) self-test: passed") { throw "$cli does not run as ${{ matrix.arch }}" }
+          & $cli --no-ui --all --dry-run
+          if ($LASTEXITCODE -ne 0) { throw "$cli --no-ui --all --dry-run failed ($LASTEXITCODE)" }
+          $run = Start-Process -FilePath $gui -ArgumentList "--self-test" -Wait -PassThru
+          if ($run.ExitCode -ne 0) { throw "$gui --self-test failed ($($run.ExitCode))" }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
-          name: executables
+          name: executables-${{ matrix.arch }}
           path: |
-            dist/CloseAllPython.exe
-            dist/CloseAllPython-CLI.exe
+            dist/CloseAllPython${{ matrix.suffix }}.exe
+            dist/CloseAllPython-CLI${{ matrix.suffix }}.exe
           if-no-files-found: error
           retention-days: 14
 
@@ -106,7 +147,8 @@ jobs:
           fi
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
         with:
-          name: executables
+          pattern: executables-*
+          merge-multiple: true
           path: dist
       - name: Write the release notes
         # The notes cover every version since the previous release, so a version that never had
@@ -125,7 +167,8 @@ jobs:
           else
             gh release create "$TAG" --title "$title" --notes-file release-notes.md --verify-tag
           fi
-          gh release upload "$TAG" dist/CloseAllPython.exe dist/CloseAllPython-CLI.exe --clobber
+          gh release upload "$TAG" dist/CloseAllPython.exe dist/CloseAllPython-CLI.exe \
+            dist/CloseAllPython-ARM64.exe dist/CloseAllPython-CLI-ARM64.exe --clobber
 
   notes:
     # Manual run (Actions › Tests and release › Run workflow): choose "Use workflow from: Branch:
